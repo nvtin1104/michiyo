@@ -82,6 +82,56 @@
         2
       ],
       "fps": 8
+    },
+    "greeting": {
+      "frames": [
+        12,
+        13,
+        12,
+        13
+      ],
+      "fps": 8
+    },
+    "touched": {
+      "frames": [
+        14,
+        14,
+        15,
+        0
+      ],
+      "fps": 8
+    },
+    "petting": {
+      "frames": [
+        14,
+        15,
+        14,
+        15
+      ],
+      "fps": 8
+    },
+    "dragging": {
+      "frames": [
+        16
+      ],
+      "fps": 8
+    },
+    "settling": {
+      "frames": [
+        17,
+        17,
+        0
+      ],
+      "fps": 8
+    },
+    "waking": {
+      "frames": [
+        18,
+        19,
+        18,
+        0
+      ],
+      "fps": 8
     }
   }
 }

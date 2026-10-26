@@ -296,7 +296,7 @@
       : t('Viết điều bạn muốn chia sẻ…', $locale)}
     oninput={() => {
       resizeComposer();
-      if (desktop) emit('mascot-state', 'listening');
+      if (desktop && !busy) emit('mascot-state', 'listening');
     }}
     onkeydown={(e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {

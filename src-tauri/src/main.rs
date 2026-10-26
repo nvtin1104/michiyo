@@ -8,6 +8,7 @@ use tauri_plugin_store::StoreExt;
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            let _ = commands::ensure_mascot_on_screen(app);
             if let Some(w) = app.get_webview_window("mascot") {
                 let _ = w.show();
                 let _ = app.emit_to("mascot", "mascot-visible", true);
@@ -110,6 +111,7 @@ fn main() {
                 {
                     let x = ((cursor.x - p.x as f64) * 160. / size.width as f64).floor() as i32;
                     let y = ((cursor.y - p.y as f64) * 160. / size.height as f64).floor() as i32;
+                    let _ = w.emit("mascot-pointer", serde_json::json!({"x":x,"y":y}));
                     let runtime = h.state::<commands::Runtime>();
                     let mask = runtime.mask.lock().unwrap();
                     let hit =

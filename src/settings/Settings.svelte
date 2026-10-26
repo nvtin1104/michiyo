@@ -32,7 +32,7 @@
   let show = false;
   let stored: Record<string, boolean> = {};
   let dirtyTimer: ReturnType<typeof setTimeout>;
-  let skins = ['default'];
+  let skins = ['default', 'reze'];
   let skinDirectory = '';
   onMount(() => {
     if (desktop) {
@@ -299,7 +299,12 @@
             bind:value={config.skin}
             options={skins.map((value) => ({
               value,
-              label: value === 'default' ? 'Moon gardener' : value,
+              label:
+                value === 'default'
+                  ? 'Moon gardener'
+                  : value === 'reze'
+                    ? 'Reze · 3D'
+                    : value,
             }))}
             onchange={changed}
           /></label
@@ -324,6 +329,22 @@
             bind:value={config.sleepMinutes}
           /></label
         ><label class="check"
+          ><input type="checkbox" bind:checked={config.cursorTracking} />Nhìn
+          theo con trỏ</label
+        >
+        <label class="check"
+          ><input type="checkbox" bind:checked={config.touchReactions} />Phản
+          ứng khi chạm / giữ trên đầu</label
+        >
+        <label class="check"
+          ><input type="checkbox" bind:checked={config.clickOpensChat} />Click
+          mascot để mở chat</label
+        >
+        <p class="muted">
+          Giữ trên đầu để vuốt ve; kéo phần thân để di chuyển. Chuột phải mở
+          menu. Enter luôn mở chat.
+        </p>
+        <label class="check"
           ><input type="checkbox" disabled />{t(
             'Live2D · chưa tích hợp (Pixi v8 cần adapter riêng)',
             $locale,

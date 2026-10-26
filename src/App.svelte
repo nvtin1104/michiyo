@@ -7,12 +7,40 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { enable, disable } from '@tauri-apps/plugin-autostart';
   import { call, desktop, defaults, type Config } from './lib/api';
-  import { MascotMachine, type State } from './mascot/machine';
+  import {
+    MascotMachine,
+    isState,
+    type State,
+    type Pose,
+  } from './mascot/machine';
   let view =
     new URLSearchParams(location.search).get('view') ||
     (desktop ? 'mascot' : 'chat');
   let config: Config = structuredClone(defaults);
   let state: State = 'idle';
+  let pose: Pose = 'idle';
+  let pointer = { x: 80, y: 80 };
+  let holdTimer: ReturnType<typeof setTimeout>;
+  let pressing = false;
+  let petting = false;
+  let headPress = false;
+  function syncPose() {
+    state = machine.state;
+    pose = machine.pose;
+  }
+  function react(kind: Parameters<MascotMachine['react']>[0]) {
+    if (
+      config.touchReactions ||
+      kind === 'greeting' ||
+      machine.state === 'sleep'
+    )
+      machine.react(kind);
+    syncPose();
+  }
+  function cancelPress() {
+    clearTimeout(holdTimer);
+    pressing = false;
+  }
   let error = '';
   const machine = new MascotMachine();
   let moved = false;
@@ -56,20 +84,35 @@
   onMount(() => {
     let off: undefined | (() => void);
     let offConfig: undefined | (() => void);
+    let offPointer: undefined | (() => void);
+    let disposed = false;
     reload();
+    react('greeting');
     if (desktop) {
       listen<State>('mascot-state', (e) => {
-        state = machine.transition(e.payload);
-      }).then((f) => (off = f));
-      listen('config-changed', reload).then((f) => (offConfig = f));
+        if (isState(e.payload)) {
+          machine.transition(e.payload);
+          syncPose();
+        }
+      }).then((f) => (disposed ? f() : (off = f)));
+      listen('config-changed', reload).then((f) =>
+        disposed ? f() : (offConfig = f),
+      );
+      if (view === 'mascot')
+        listen<{ x: number; y: number }>('mascot-pointer', (e) => {
+          pointer = e.payload;
+        }).then((f) => (disposed ? f() : (offPointer = f)));
     }
-    const timer = setInterval(
-      () => (state = machine.tick(Date.now(), config.sleepMinutes)),
-      1000,
-    );
+    const timer = setInterval(() => {
+      machine.tick(Date.now(), config.sleepMinutes);
+      syncPose();
+    }, 100);
     return () => {
       off?.();
       offConfig?.();
+      offPointer?.();
+      disposed = true;
+      cancelPress();
       clearInterval(timer);
     };
   });
@@ -77,16 +120,18 @@
 
 {#if view === 'mascot'}<div
     class="mascot-window"
+    data-state={state}
+    data-pose={pose}
     style:opacity={config.opacity}
     style:transform={`scale(${config.scale})`}
     style:transform-origin="top left"
     onpointerenter={() => {
-      if (!['thinking', 'talking'].includes(state))
-        state = machine.transition('hover');
+      machine.hover(true);
+      syncPose();
     }}
     onpointerleave={() => {
-      if (!['thinking', 'talking'].includes(state))
-        state = machine.transition('idle');
+      machine.hover(false);
+      syncPose();
     }}
     role="button"
     tabindex="0"
@@ -96,33 +141,76 @@
     }}
     onpointerdown={(e) => {
       if (e.button !== 0) return;
+      cancelPress();
       start = { x: e.screenX, y: e.screenY };
       moved = false;
+      pressing = true;
+      petting = false;
+      const r = e.currentTarget.getBoundingClientRect();
+      const y = (e.clientY - r.top) / r.height;
+      headPress = y < (config.skin === 'reze' ? 0.32 : 0.56);
+      e.currentTarget.setPointerCapture(e.pointerId);
+      if (headPress && config.touchReactions)
+        holdTimer = setTimeout(() => {
+          if (pressing && !moved) {
+            petting = true;
+            react('petting');
+          }
+        }, 450);
     }}
     onpointermove={(e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      pointer = {
+        x: ((e.clientX - r.left) / r.width) * 160,
+        y: ((e.clientY - r.top) / r.height) * 160,
+      };
       if (
+        pressing &&
         e.buttons === 1 &&
-        Math.hypot(e.screenX - start.x, e.screenY - start.y) > 4 &&
+        Math.hypot(e.screenX - start.x, e.screenY - start.y) >
+          (headPress && config.touchReactions ? 24 : 4) &&
         !moved
       ) {
         moved = true;
-        getCurrentWindow()
-          .startDragging()
-          .catch((e) => (error = String(e)));
+        cancelPress();
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        react('dragging');
+        if (desktop)
+          getCurrentWindow()
+            .startDragging()
+            .catch((e) => (error = String(e)))
+            .finally(() => react('settling'));
       }
     }}
     onpointerup={(e) => {
-      if (e.button === 0 && !moved)
-        call('open_panel', { label: 'chat' }).catch((e) => (error = String(e)));
+      if (e.button !== 0) return;
+      const wasPressing = pressing;
+      cancelPress();
+      if (e.currentTarget.hasPointerCapture(e.pointerId))
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      if (moved) react('settling');
+      else if (wasPressing && !petting) {
+        react('touched');
+        if (config.clickOpensChat && desktop)
+          call('open_panel', { label: 'chat' }).catch(
+            (e) => (error = String(e)),
+          );
+      }
+    }}
+    onpointercancel={() => {
+      cancelPress();
+      if (moved) react('settling');
     }}
     oncontextmenu={(e) => {
       e.preventDefault();
       if (desktop) call('mascot_menu').catch((e) => (error = String(e)));
     }}
   >
-    {#await import('./mascot/Mascot.svelte') then module}<svelte:component
+    {#await import('./mascot/Companion.svelte') then module}<svelte:component
         this={module.default}
-        {state}
+        state={pose}
+        {pointer}
+        tracking={config.cursorTracking}
         skin={config.skin}
         speed={config.animationSpeed}
         reduced={config.reducedMotion ||

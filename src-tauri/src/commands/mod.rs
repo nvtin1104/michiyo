@@ -175,7 +175,7 @@ pub async fn chat(
     state.jobs.lock().unwrap().remove(&id);
     let _ = app.emit(
         "mascot-state",
-        if outcome.is_ok() { "idle" } else { "error" },
+        if outcome.is_ok() { "happy" } else { "error" },
     );
     outcome
 }
@@ -596,7 +596,29 @@ pub async fn apply_config(app: tauri::AppHandle) -> Result<(), String> {
     if previous_anchor.is_some_and(|old| old != anchor) {
         reset_position(app.clone())?;
     }
+    ensure_mascot_on_screen(&app)?;
     let _ = app.emit("config-changed", ());
+    Ok(())
+}
+
+// Saved physical coordinates may belong to a monitor that is no longer attached.
+// Validate after applying scale so the complete mascot remains reachable.
+pub fn ensure_mascot_on_screen(app: &tauri::AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("mascot") else { return Ok(()); };
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+    let visible = monitors.iter().any(|monitor| {
+        let area = monitor.work_area();
+        position.x as i64 >= area.position.x as i64
+            && position.y as i64 >= area.position.y as i64
+            && position.x as i64 + size.width as i64 <= area.position.x as i64 + area.size.width as i64
+            && position.y as i64 + size.height as i64 <= area.position.y as i64 + area.size.height as i64
+    });
+    if !visible && !monitors.is_empty() {
+        reset_position(app.clone())?;
+        save_mascot_position(app.clone())?;
+    }
     Ok(())
 }
 

@@ -37,6 +37,9 @@ export const defaults = {
   skin: 'default',
   animationSpeed: 1,
   reducedMotion: false,
+  cursorTracking: true,
+  touchReactions: true,
+  clickOpensChat: true,
   sleepMinutes: 5,
   live2d: false,
 };

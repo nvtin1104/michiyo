@@ -13,7 +13,7 @@ fn root(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
 #[tauri::command]
 pub fn list_skins(app: tauri::AppHandle) -> Result<Value, String> {
     let root = root(&app)?;
-    let mut names = vec!["default".to_string()];
+    let mut names = vec!["default".to_string(), "reze".to_string()];
     for entry in std::fs::read_dir(&root)
         .map_err(|e| e.to_string())?
         .flatten()
@@ -22,7 +22,7 @@ pub fn list_skins(app: tauri::AppHandle) -> Result<Value, String> {
             && entry.path().join("spritesheet.png").is_file()
         {
             if let Some(name) = entry.file_name().to_str() {
-                names.push(name.to_string());
+                if !names.iter().any(|n| n == name) { names.push(name.to_string()); }
             }
         }
     }

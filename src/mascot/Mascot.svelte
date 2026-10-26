@@ -1,17 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Application, Sprite, Texture, Rectangle } from 'pixi.js';
-  import type { State } from './machine';
+  import type { Pose } from './machine';
   import { call, desktop } from '../lib/api';
   import { listen } from '@tauri-apps/api/event';
-  export let state: State = 'idle';
+  export let state: Pose = 'idle';
   export let speed = 1;
   export let reduced = false;
   export let skin = 'default';
+  export let pointer = { x: 80, y: 80 };
+  export let tracking = true;
   let host: HTMLDivElement;
   let ready = false;
   let changeSkin: (name: string) => Promise<void> = async () => {};
+  let refreshPose: (pose: Pose, reduced: boolean) => void = () => {};
   $: if (ready) changeSkin(skin);
+  $: if (ready) refreshPose(state, reduced);
   onMount(() => {
     let app: Application;
     let disposed = false;
@@ -19,7 +23,6 @@
     let visibility: () => void;
     let frame = 0;
     let currentSkin = '';
-    let pointer = { x: 80, y: 80 };
     let manifest: {
       frameWidth: number;
       frameHeight: number;
@@ -32,6 +35,7 @@
     let loadId = 0;
     let visible = true;
     let offVisible: (() => void) | undefined;
+    let maskBusy = false;
     let transitionFrame = 0;
     let previousState = state;
     let nextBlink = performance.now() + 2000 + Math.random() * 5000;
@@ -44,8 +48,20 @@
       const animation = manifest.states[state] || manifest.states.idle;
       let index =
         animation.frames[Math.floor(frame++) % animation.frames.length];
-      if (currentSkin === 'default' && state === 'hover')
-        index = pointer.x > 80 ? 11 : 1;
+      if (
+        currentSkin === 'default' &&
+        ['hover', 'idle'].includes(state) &&
+        tracking &&
+        !reduced &&
+        Math.hypot(pointer.x - 80, pointer.y - 80) < 650
+      ) {
+        const dx = pointer.x - 80,
+          dy = pointer.y - 80;
+        if (Math.max(Math.abs(dx), Math.abs(dy)) > 18)
+          index =
+            Math.abs(dy) > Math.abs(dx) ? (dy < 0 ? 20 : 21) : dx > 0 ? 11 : 1;
+      }
+      if (reduced) index = animation.frames[0];
       if (currentSkin === 'default' && state === 'idle' && !reduced) {
         const now = performance.now();
         if (now >= nextBlink) {
@@ -67,21 +83,32 @@
         });
         if (previousTexture !== Texture.EMPTY) previousTexture.destroy(false);
         lastFrame = index;
-        ctx.clearRect(0, 0, 160, 160);
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(image, x, y, fw, fh, 16, 21, 128, 128);
-        const pixels = ctx.getImageData(0, 0, 160, 160).data;
-        if (desktop)
-          call('set_hit_mask', {
-            mask: Array.from(
-              { length: 160 * 160 },
-              (_, i) => pixels[i * 4 + 3] > 16,
-            ),
-          }).catch(() => {});
       }
       sprite.x = 80;
       sprite.y = 85;
+      sprite.rotation = 0;
+      if (!reduced) {
+        const wave = Math.sin(performance.now() / 180);
+        if (state === 'happy' || state === 'greeting')
+          sprite.y -= Math.abs(wave) * 3;
+        if (state === 'petting' || state === 'touched')
+          sprite.rotation = wave * 0.045;
+        if (state === 'dragging') sprite.rotation = wave * 0.08;
+        if (state === 'sleep') sprite.y += 2;
+      }
       app.render();
+      ctx.clearRect(0, 0, 160, 160);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(app.canvas, 0, 0, 160, 160);
+      const pixels = ctx.getImageData(0, 0, 160, 160).data;
+      if (desktop && !maskBusy) {
+        maskBusy = true;
+        call('set_hit_mask', {
+          mask: Array.from({ length: 25600 }, (_, i) => pixels[i * 4 + 3] > 16),
+        })
+          .catch(() => {})
+          .finally(() => (maskBusy = false));
+      }
       if (previousState !== state && !reduced) {
         previousState = state;
         cancelAnimationFrame(transitionFrame);
@@ -102,6 +129,11 @@
             ? 1
             : Math.min(12, Math.max(1, animation.fps * speed))),
       );
+    };
+    refreshPose = () => {
+      frame = 0;
+      clearTimeout(timer);
+      if (sheet && !disposed) draw();
     };
     changeSkin = async (name) => {
       if (name === currentSkin) return;
@@ -166,6 +198,7 @@
         }
         image = img;
         manifest = data;
+        const oldSheet = sheet;
         sheet = Texture.from(img);
         sheet.source.scaleMode = 'nearest';
         sprite.scale.set(128 / fw, 128 / fh);
@@ -173,6 +206,7 @@
         lastFrame = -1;
         clearTimeout(timer);
         draw();
+        oldSheet?.destroy(true);
       } catch (e) {
         console.error('Không tải được skin', e);
         if (name !== 'default') await changeSkin('default');
@@ -206,31 +240,26 @@
         if (!document.hidden) draw();
       };
       document.addEventListener('visibilitychange', visibility);
-      if (desktop)
-        offVisible = await listen<boolean>('mascot-visible', (e) => {
+      if (desktop) {
+        const unlisten = await listen<boolean>('mascot-visible', (e) => {
           visible = e.payload;
           clearTimeout(timer);
           cancelAnimationFrame(transitionFrame);
           if (visible) draw();
         });
+        if (disposed) unlisten();
+        else offVisible = unlisten;
+      }
     })();
-    const move = (e: PointerEvent) => {
-      const r = host.getBoundingClientRect();
-      pointer = {
-        x: ((e.clientX - r.x) / r.width) * 160,
-        y: ((e.clientY - r.y) / r.height) * 160,
-      };
-    };
-    host.addEventListener('pointermove', move);
     return () => {
       disposed = true;
       clearTimeout(timer);
       cancelAnimationFrame(transitionFrame);
       offVisible?.();
-      host.removeEventListener('pointermove', move);
       if (visibility)
         document.removeEventListener('visibilitychange', visibility);
       app?.destroy(true);
+      sheet?.destroy(true);
     };
   });
 </script>
