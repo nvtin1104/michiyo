@@ -20,7 +20,7 @@ Hidden renderers stop drawing. Both renderers publish an alpha silhouette to the
 
 ## Reze assets and editing
 
-- Original supplied file: `public/skins/reze/reze_de_chainsaw_man.glb` (unchanged).
+- Original supplied file: `assets-src/reze/reze_de_chainsaw_man.glb` (unchanged; kept outside `public/` so it is not bundled).
 - Runtime asset: `public/skins/reze/reze-companion.glb` (~7.4 MiB).
 - Runtime camera/model/bone metadata: `public/skins/reze/manifest.json`.
 - Editable source generated locally: `artifacts/reze/reze-companion.blend`.

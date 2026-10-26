@@ -7,7 +7,7 @@ out = root/'public/skins/reze'
 work = root/'artifacts/reze'
 work.mkdir(parents=True, exist_ok=True)
 bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.import_scene.gltf(filepath=str(out/'reze_de_chainsaw_man.glb'))
+bpy.ops.import_scene.gltf(filepath=str(root/'assets-src/reze/reze_de_chainsaw_man.glb'))
 meshes = [o for o in bpy.data.objects if o.type == 'MESH']
 # The duplicate inverted-hull outline is unreliable after decimation/skinning.
 # Keep the textured surfaces; the original download remains untouched.

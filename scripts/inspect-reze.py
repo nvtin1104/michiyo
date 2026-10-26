@@ -3,7 +3,7 @@ from mathutils import Vector
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.import_scene.gltf(filepath=str(root/'public/skins/reze/reze_de_chainsaw_man.glb'))
+bpy.ops.import_scene.gltf(filepath=str(root/'assets-src/reze/reze_de_chainsaw_man.glb'))
 result=[]
 for o in bpy.data.objects:
     if o.type == 'MESH':
