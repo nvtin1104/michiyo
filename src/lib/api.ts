@@ -40,6 +40,7 @@ export const defaults = {
   cursorTracking: true,
   touchReactions: true,
   clickOpensChat: true,
+  soundEffects: true,
   sleepMinutes: 5,
   live2d: false,
 };

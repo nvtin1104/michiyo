@@ -8,7 +8,13 @@ export type State =
   | 'error'
   | 'sleep';
 export type Reaction =
-  'greeting' | 'touched' | 'petting' | 'dragging' | 'settling' | 'waking';
+  | 'greeting'
+  | 'touched'
+  | 'petting'
+  | 'dragging'
+  | 'carried'
+  | 'settling'
+  | 'waking';
 export type Pose = State | Reaction;
 const states: State[] = [
   'idle',
@@ -41,7 +47,12 @@ export class MascotMachine {
     this.lastActivity = now;
     this.reaction = next;
     this.reactionUntil =
-      now + (next === 'dragging' ? 15000 : next === 'petting' ? 1800 : 1100);
+      now +
+      (next === 'dragging' || next === 'carried'
+        ? 15000
+        : next === 'petting'
+          ? 1800
+          : 1100);
   }
   hover(inside: boolean) {
     if (['idle', 'hover'].includes(this.state))

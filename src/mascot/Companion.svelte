@@ -7,6 +7,7 @@
   export let skin = 'default';
   export let pointer = { x: 80, y: 80 };
   export let tracking = true;
+  export let sound = true;
   let failed = false;
   let previousSkin = skin;
   $: if (previousSkin !== skin) {
@@ -26,6 +27,7 @@
       {reduced}
       {pointer}
       {tracking}
+      {sound}
       onfailure={() => (failed = true)}
     />
   {:catch}

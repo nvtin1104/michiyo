@@ -24,6 +24,8 @@
   let pressing = false;
   let petting = false;
   let headPress = false;
+  // Grabbing above the chest lifts her up; lower down slings her over a shoulder.
+  let chestPress = false;
   function syncPose() {
     state = machine.state;
     pose = machine.pose;
@@ -149,6 +151,7 @@
       const r = e.currentTarget.getBoundingClientRect();
       const y = (e.clientY - r.top) / r.height;
       headPress = y < (config.skin === 'reze' ? 0.32 : 0.56);
+      chestPress = y < (config.skin === 'reze' ? 0.37 : 0.5);
       e.currentTarget.setPointerCapture(e.pointerId);
       if (headPress && config.touchReactions)
         holdTimer = setTimeout(() => {
@@ -174,7 +177,7 @@
         moved = true;
         cancelPress();
         e.currentTarget.releasePointerCapture(e.pointerId);
-        react('dragging');
+        react(chestPress ? 'dragging' : 'carried');
         if (desktop)
           getCurrentWindow()
             .startDragging()
@@ -211,6 +214,7 @@
         state={pose}
         {pointer}
         tracking={config.cursorTracking}
+        sound={config.soundEffects}
         skin={config.skin}
         speed={config.animationSpeed}
         reduced={config.reducedMotion ||

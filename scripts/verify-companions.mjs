@@ -35,6 +35,9 @@ try {
           return;
         }
         window.calls.push({ command, args });
+        // Keep the mocked native drag open long enough to see the drag pose.
+        if (command === 'plugin:window|start_dragging')
+          return new Promise((done) => setTimeout(done, 1200));
         if (command === 'plugin:store|load') return 1;
         if (command === 'plugin:store|get') return [window.config, true];
         if (command === 'plugin:event|listen') {
@@ -124,6 +127,20 @@ try {
   assert.equal(await mascot.getAttribute('data-state'), 'sleep');
   await page.mouse.click(240, 70);
   assert.equal(await mascot.getAttribute('data-pose'), 'waking');
+  // Grabbing above the chest lifts her; lower down slings her over a shoulder.
+  for (const [y, pose] of [
+    [60, 'dragging'],
+    [330, 'carried'],
+  ]) {
+    await page.waitForTimeout(1300);
+    await page.mouse.move(240, y);
+    await page.mouse.down();
+    await page.mouse.move(300, y, { steps: 6 });
+    assert.equal(await mascot.getAttribute('data-pose'), pose);
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: `artifacts/reze/app-${pose}.png` });
+    await page.mouse.up();
+  }
   // Dispose/recreate both rendering engines, then verify reduced motion and fallback.
   for (const skin of ['default', 'reze', 'default', 'reze']) {
     await page.evaluate((skin) => {
@@ -146,7 +163,7 @@ try {
   await page.locator('.fallback').waitFor();
   await page.waitForFunction(() => window.mask.some(Boolean));
   console.log(
-    'PASS: system state survives touch; pet/drag do not open chat; Reze renders, tracks cursor, sleeps/wakes, switches engines and falls back on load failure.',
+    'PASS: system state survives touch; pet/drag do not open chat; Reze renders, tracks cursor, sleeps/wakes, lifts/carries by grab height, switches engines and falls back on load failure.',
   );
 } finally {
   await browser.close();

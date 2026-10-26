@@ -11,9 +11,11 @@
   export let reduced = false;
   export let pointer = { x: 80, y: 80 };
   export let tracking = true;
+  export let sound = true;
   export let onfailure: () => void;
   let host: HTMLDivElement;
   let loading = true;
+  let spark = false;
   onMount(() => {
     let disposed = false,
       visible = true,
@@ -26,6 +28,76 @@
     let mixer: THREE.AnimationMixer;
     let active: THREE.AnimationAction | undefined;
     let previous = '';
+    let previousState = state;
+    // Idle variety: occasionally swap the base idle for a move, sit or the pin pull.
+    const oneShots = new Set(manifest.oneShots);
+    const seated = new Set(manifest.seated);
+    let mood = 'idle';
+    let moodUntil = performance.now() + 4000 + Math.random() * 4000;
+    let sparkTimer: ReturnType<typeof setTimeout> | undefined;
+    const sounds = new Map<string, HTMLAudioElement>();
+    function play(kind: keyof typeof manifest.sounds) {
+      if (!sound || reduced) return;
+      const list = manifest.sounds[kind];
+      const src = `/skins/reze/${list[Math.floor(Math.random() * list.length)]}`;
+      let audio = sounds.get(src);
+      if (!audio) sounds.set(src, (audio = new Audio(src)));
+      audio.volume = 0.55;
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    }
+    function duration(name: string) {
+      return ((actions.get(name)?.getClip().duration || 2) * 1000) / speed;
+    }
+    function startMood(name: string, now: number, loud = false) {
+      mood = name;
+      moodUntil =
+        now +
+        (oneShots.has(name)
+          ? duration(name) + 300
+          : seated.has(name)
+            ? 12000 + Math.random() * 12000
+            : 6000 + Math.random() * 5000);
+      clearTimeout(sparkTimer);
+      if (name === 'boom')
+        sparkTimer = setTimeout(
+          () => {
+            spark = true;
+            if (loud) play('boom');
+            sparkTimer = setTimeout(() => (spark = false), 650);
+          },
+          duration(name) * 0.42,
+        );
+    }
+    function chooseMood(now: number) {
+      if (mood !== 'idle') {
+        mood = 'idle';
+        moodUntil = now + 4000 + Math.random() * 6000;
+        return;
+      }
+      const moves = Object.entries(manifest.idleMoves);
+      let roll = Math.random() * moves.reduce((sum, [, w]) => sum + w, 0);
+      for (const [name, weight] of moves)
+        if ((roll -= weight) <= 0) return startMood(name, now);
+    }
+    function clipFor(now: number) {
+      if (state !== previousState) {
+        if (state === 'touched') {
+          play('touched');
+          if (Math.random() < 0.25) startMood('boom', now, true);
+        }
+        previousState = state;
+      }
+      if (reduced) return state;
+      if (state === 'touched' && mood === 'boom') return mood;
+      if (state === 'idle' || state === 'hover') {
+        if (now >= moodUntil) chooseMood(now);
+        return mood === 'idle' ? state : mood;
+      }
+      mood = 'idle';
+      moodUntil = now + 5000 + Math.random() * 5000;
+      return state;
+    }
     let wasReduced = reduced;
     let head: THREE.Object3D | undefined;
     const headPose = new THREE.Quaternion();
@@ -72,24 +144,30 @@
       const dt = Math.min((now - last) / 1000, 0.2);
       last = now;
       if (head && hasHeadPose) head.quaternion.copy(headPose);
-      if (state !== previous || reduced !== wasReduced) {
-        const next = actions.get(state) || actions.get('idle');
+      const clip = clipFor(now);
+      if (clip !== previous || reduced !== wasReduced) {
+        const next = actions.get(clip) || actions.get('idle');
         if (next && (next !== active || reduced !== wasReduced)) {
           if (reduced) {
             mixer.stopAllAction();
             next.reset().stopFading().setEffectiveWeight(1).play();
           } else {
-            active?.fadeOut(0.22);
-            next.reset().fadeIn(0.22).play();
+            // Sitting down or standing up needs a slower blend than a gesture.
+            const fade = seated.has(clip) || seated.has(previous) ? 0.7 : 0.25;
+            active?.fadeOut(fade);
+            next.reset().fadeIn(fade).play();
           }
           active = next;
         }
-        previous = state;
+        previous = clip;
         wasReduced = reduced;
       }
       mixer.update(reduced ? 0 : dt * speed);
       const trackingAllowed =
-        tracking && !reduced && !['sleep', 'dragging'].includes(state);
+        tracking &&
+        !reduced &&
+        !['sleep', 'dragging', 'carried'].includes(state) &&
+        !seated.has(previous);
       const near = Math.hypot(pointer.x - 80, pointer.y - 50) < 650;
       const tx =
         trackingAllowed && near
@@ -160,8 +238,14 @@
         scene.add(model);
         head = model.getObjectByName(manifest.headBone);
         mixer = new THREE.AnimationMixer(model);
-        for (const clip of gltf.animations)
-          actions.set(clip.name, mixer.clipAction(clip));
+        for (const clip of gltf.animations) {
+          const action = mixer.clipAction(clip);
+          if (oneShots.has(clip.name)) {
+            action.setLoop(THREE.LoopOnce, 1);
+            action.clampWhenFinished = true;
+          }
+          actions.set(clip.name, action);
+        }
         loading = false;
         if (desktop) {
           const unlisten = await listen<boolean>('mascot-visible', (e) => {
@@ -184,6 +268,8 @@
     return () => {
       disposed = true;
       cancelAnimationFrame(frame);
+      clearTimeout(sparkTimer);
+      sounds.forEach((a) => a.pause());
       off?.();
       document.removeEventListener('visibilitychange', resume);
       resize?.disconnect();
@@ -201,14 +287,46 @@
 
 <div class="sprite model" bind:this={host} data-renderer="three">
   {#if loading}<span role="status">Đang tải Reze…</span>{/if}
+  {#if spark}<i class="spark" aria-hidden="true"></i>{/if}
 </div>
 
 <style>
   .model {
+    position: relative;
     image-rendering: auto;
   }
   .model :global(canvas) {
     image-rendering: auto;
+  }
+  .spark {
+    position: absolute;
+    left: 22%;
+    top: 20%;
+    width: 18%;
+    aspect-ratio: 1;
+    pointer-events: none;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle,
+      #fff7c2 0 18%,
+      #ffb347 32%,
+      #ff5e3a 52%,
+      transparent 70%
+    );
+    animation: boom 0.65s ease-out forwards;
+  }
+  @keyframes boom {
+    from {
+      transform: scale(0.2);
+      opacity: 1;
+    }
+    60% {
+      opacity: 0.9;
+    }
+    to {
+      transform: scale(1.8);
+      opacity: 0;
+    }
   }
   span {
     position: absolute;

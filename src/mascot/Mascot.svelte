@@ -45,7 +45,10 @@
     const ctx = maskCanvas.getContext('2d', { willReadFrequently: true })!;
     const draw = () => {
       if (disposed || document.hidden || !visible || !sheet) return;
-      const animation = manifest.states[state] || manifest.states.idle;
+      const animation =
+        manifest.states[state] ||
+        (state === 'carried' && manifest.states.dragging) ||
+        manifest.states.idle;
       let index =
         animation.frames[Math.floor(frame++) % animation.frames.length];
       if (
@@ -93,7 +96,8 @@
           sprite.y -= Math.abs(wave) * 3;
         if (state === 'petting' || state === 'touched')
           sprite.rotation = wave * 0.045;
-        if (state === 'dragging') sprite.rotation = wave * 0.08;
+        if (state === 'dragging' || state === 'carried')
+          sprite.rotation = wave * 0.08;
         if (state === 'sleep') sprite.y += 2;
       }
       app.render();

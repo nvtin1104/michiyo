@@ -340,9 +340,13 @@
           ><input type="checkbox" bind:checked={config.clickOpensChat} />Click
           mascot để mở chat</label
         >
+        <label class="check"
+          ><input type="checkbox" bind:checked={config.soundEffects} />Âm thanh
+          khi chọc (Reze)</label
+        >
         <p class="muted">
-          Giữ trên đầu để vuốt ve; kéo phần thân để di chuyển. Chuột phải mở
-          menu. Enter luôn mở chat.
+          Giữ trên đầu để vuốt ve; kéo từ ngực trở lên để nhấc bổng, kéo phần
+          dưới để vác lên vai. Chuột phải mở menu. Enter luôn mở chat.
         </p>
         <label class="check"
           ><input type="checkbox" disabled />{t(

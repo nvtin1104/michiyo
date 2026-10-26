@@ -51,3 +51,11 @@ it('listening expires and repeated touches are throttled', () => {
   m.tick(2150, 5);
   expect(m.pose).toBe('listening');
 });
+it('a shoulder carry lasts as long as a drag', () => {
+  const m = new MascotMachine();
+  m.react('carried', 1000);
+  m.tick(10000, 5);
+  expect(m.pose).toBe('carried');
+  m.react('settling', 10000);
+  expect(m.pose).toBe('settling');
+});
