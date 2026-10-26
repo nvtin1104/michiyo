@@ -35,8 +35,32 @@ fn main() {
             commands::take_chat_prompt,
             commands::ask_translation,
             commands::reset_position,
-            commands::copy_text
+            commands::copy_text,
+            commands::mascot_menu
         ])
+        .on_menu_event(|app, event| {
+            let label = match event.id.as_ref() {
+                "mascot-chat" => "chat",
+                "mascot-translate" => "translate",
+                "mascot-settings" => "settings",
+                "mascot-hide" => {
+                    if let Some(w) = app.get_webview_window("mascot") {
+                        let _ = w.hide();
+                        let _ = app.emit_to("mascot", "mascot-visible", false);
+                    }
+                    return;
+                }
+                "mascot-quit" => {
+                    app.exit(0);
+                    return;
+                }
+                _ => return,
+            };
+            let h = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = commands::show_panel(&h, label, false);
+            });
+        })
         .setup(|app| {
             use tauri::{
                 menu::{Menu, MenuItem},

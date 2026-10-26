@@ -30,7 +30,8 @@ assert.equal(
 await mkdir('artifacts', { recursive: true });
 await page.screenshot({ path: 'artifacts/settings.png', fullPage: true });
 await page.locator('nav button').filter({ hasText: 'Chung' }).click();
-await page.getByLabel('Ngôn ngữ giao diện').selectOption('en');
+await page.getByRole('combobox', { name: 'Ngôn ngữ giao diện' }).click();
+await page.getByRole('option', { name: 'English', exact: true }).click();
 await page.getByRole('heading', { name: /^Settings/ }).waitFor();
 assert.equal(
   await page.evaluate(() =>
@@ -43,10 +44,19 @@ assert.equal(
 await page.reload();
 await page.getByRole('button', { name: 'Settings', exact: true }).click();
 await page.getByRole('heading', { name: /^Settings/ }).waitFor();
-assert.equal(await page.getByLabel('Interface language').inputValue(), 'en');
-await page.getByLabel('Interface language').selectOption('vi');
+assert.match(
+  await page
+    .getByRole('combobox', { name: 'Interface language' })
+    .textContent(),
+  /English/,
+);
+await page.getByRole('combobox', { name: 'Interface language' }).click();
+await page.getByRole('option', { name: 'Tiếng Việt', exact: true }).click();
 await page.getByRole('heading', { name: /^Cài đặt/ }).waitFor();
-await page.getByRole('button', { name: 'Dịch', exact: true }).click();
+await page
+  .locator('.preview-bar')
+  .getByRole('button', { name: 'Dịch', exact: true })
+  .click();
 await page.getByRole('textbox', { name: 'Văn bản cần dịch' }).fill('Hello');
 await page.getByRole('button', { name: 'Dịch ↗', exact: true }).click();
 await page.getByRole('alert').waitFor();

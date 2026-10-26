@@ -104,6 +104,7 @@
       if (e.key === 'Enter') call('open_panel', { label: 'chat' });
     }}
     onpointerdown={(e) => {
+      if (e.button !== 0) return;
       start = { x: e.screenX, y: e.screenY };
       moved = false;
     }}
@@ -119,9 +120,13 @@
           .catch((e) => (error = String(e)));
       }
     }}
-    onpointerup={() => {
-      if (!moved)
-        call('open_panel', { label: keyMissing ? 'settings' : 'chat' });
+    onpointerup={(e) => {
+      if (e.button === 0 && !moved)
+        call('open_panel', { label: 'chat' }).catch((e) => (error = String(e)));
+    }}
+    oncontextmenu={(e) => {
+      e.preventDefault();
+      if (desktop) call('mascot_menu').catch((e) => (error = String(e)));
     }}
   >
     {#await import('./mascot/Mascot.svelte') then module}<svelte:component
@@ -133,7 +138,7 @@
           matchMedia('(prefers-reduced-motion: reduce)').matches}
       />{/await}{#if keyMissing}<span class="mascot-hint">⚿</span>{/if}
   </div>
-{:else}<main class:preview={!desktop}>
+{:else}<main class:preview={!desktop} class:bubble={desktop && view === 'chat'}>
     {#if !desktop}<div class="preview-bar">
         <span>MICHIYO · BẢN XEM TRƯỚC</span>
         <div>
@@ -153,6 +158,8 @@
           />{/await}{:else}{#await import('./chat/Chat.svelte') then module}<svelte:component
             this={module.default}
             {config}
+            compact={desktop ||
+              new URLSearchParams(location.search).has('compact')}
           />{/await}{/if}
     </div>
     {#if error}<p class="error">{error}</p>{/if}

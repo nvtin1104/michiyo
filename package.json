@@ -9,6 +9,8 @@
     "test": "vitest run",
     "tauri": "node scripts/tauri.mjs",
     "test:ui": "node scripts/verify-ui.mjs",
+    "test:mascot": "node scripts/verify-mascot.mjs",
+    "test:settings": "node scripts/verify-settings.mjs",
     "format": "prettier --write src scripts *.json *.ts *.js *.html"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { locale, t } from '../lib/i18n';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen, emit } from '@tauri-apps/api/event';
   import { load } from '@tauri-apps/plugin-store';
 
@@ -8,6 +9,9 @@
   import DOMPurify from 'dompurify';
   import { call, desktop, type Config } from '../lib/api';
   export let config: Config;
+  export let compact = false;
+  let composer: HTMLTextAreaElement;
+  const focus = () => tick().then(() => composer?.focus());
   type Message = { role: 'user' | 'assistant'; content: string };
   type Conversation = { id: string; title: string; messages: Message[] };
   let conversations: Conversation[] = [];
@@ -39,6 +43,8 @@
   onMount(() => {
     let off: undefined | (() => void);
     let offFollow: undefined | (() => void);
+    let offFocus: undefined | (() => void);
+    focus();
     (async () => {
       if (!desktop) return;
       const store = await load('history.json');
@@ -60,10 +66,13 @@
       };
       offFollow = await listen('ask-translation', take);
       await take();
+      offFocus = await listen('chat-focus', focus);
+      focus();
     })();
     return () => {
       off?.();
       offFollow?.();
+      offFocus?.();
     };
   });
   async function send() {
@@ -97,31 +106,40 @@
   }
 </script>
 
-<header>
-  <div>
-    <small>YOUR LITTLE COMPANION</small>
-    <h1>{t('Trò chuyện', $locale)} <span>✦</span></h1>
+{#if compact}<div class="bubble-heading">
+    <span>✦ Michiyo</span><button
+      aria-label="Đóng trò chuyện"
+      onclick={() => desktop && getCurrentWindow().hide()}>×</button
+    >
+  </div>{:else}<header>
+    <div>
+      <small>YOUR LITTLE COMPANION</small>
+      <h1>{t('Trò chuyện', $locale)} <span>✦</span></h1>
+    </div>
+    <button
+      class="icon"
+      onclick={() => call('open_panel', { label: 'settings' })}>⚙</button
+    >
+  </header>
+  <div class="toolbar">
+    <select
+      aria-label={t('Lịch sử', $locale)}
+      disabled={busy}
+      value={current}
+      onchange={(e) => {
+        current = e.currentTarget.value;
+        messages = conversations.find((c) => c.id === current)?.messages || [];
+      }}
+      ><option value="">{t('Cuộc trò chuyện mới', $locale)}</option
+      >{#each conversations as c}<option value={c.id}>{c.title}</option
+        >{/each}</select
+    ><button disabled={busy} onclick={clear}>{t('Xóa', $locale)}</button>
   </div>
-  <button class="icon" onclick={() => call('open_panel', { label: 'settings' })}
-    >⚙</button
-  >
-</header>
-<div class="toolbar">
-  <select
-    aria-label={t('Lịch sử', $locale)}
-    disabled={busy}
-    value={current}
-    onchange={(e) => {
-      current = e.currentTarget.value;
-      messages = conversations.find((c) => c.id === current)?.messages || [];
-    }}
-    ><option value="">{t('Cuộc trò chuyện mới', $locale)}</option
-    >{#each conversations as c}<option value={c.id}>{c.title}</option
-      >{/each}</select
-  ><button disabled={busy} onclick={clear}>{t('Xóa', $locale)}</button>
-</div>
+{/if}
 <div class="messages" bind:this={scroll}>
-  {#if !messages.length}<div class="welcome">
+  {#if !messages.length && compact}<p class="bubble-greeting">
+      Mình ở đây. Bạn muốn hỏi gì?
+    </p>{:else if !messages.length}<div class="welcome">
       <div class="star">✧</div>
       <h2>
         {t('Một chút giúp đỡ,', $locale)}<br />{t('một ngày nhẹ hơn.', $locale)}
@@ -164,9 +182,12 @@
   }}
 >
   <textarea
+    bind:this={composer}
     aria-label={t('Tin nhắn', $locale)}
     bind:value={input}
-    placeholder={t('Viết điều bạn muốn chia sẻ…', $locale)}
+    placeholder={compact
+      ? 'Hỏi Michiyo…'
+      : t('Viết điều bạn muốn chia sẻ…', $locale)}
     oninput={() => desktop && emit('mascot-state', 'listening')}
     onkeydown={(e) => {
       if (e.key === 'Enter' && !e.shiftKey) {

@@ -255,9 +255,9 @@ pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(
         w
     } else {
         let (title, width, height) = match label {
-            "chat" => ("Michiyo · Chat", 420., 600.),
+            "chat" => ("Michiyo · Chat", 360., 340.),
             "translate" => ("Michiyo · Dịch", 420., 400.),
-            "settings" => ("Michiyo · Cài đặt", 860., 720.),
+            "settings" => ("Michiyo · Cài đặt", 720., 540.),
             _ => return Err("Cửa sổ không hợp lệ".into()),
         };
         tauri::WebviewWindowBuilder::new(
@@ -269,12 +269,40 @@ pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(
         .inner_size(width, height)
         .visible(false)
         .always_on_top(label != "settings")
+        .decorations(label != "chat")
+        .transparent(label == "chat")
+        .shadow(label != "chat")
+        .skip_taskbar(label == "chat")
         .build()
         .map_err(|e| e.to_string())?
     };
     position_panel(app, &window, cursor)?;
     window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())
+    window.set_focus().map_err(|e| e.to_string())?;
+    if label == "chat" {
+        let _ = app.emit_to("chat", "chat-focus", ());
+    }
+    Ok(())
+}
+#[tauri::command]
+pub async fn mascot_menu(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::menu::{Menu, MenuItem};
+    let chat = MenuItem::with_id(&app, "mascot-chat", "Trò chuyện", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let translate = MenuItem::with_id(&app, "mascot-translate", "Dịch văn bản", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let settings = MenuItem::with_id(&app, "mascot-settings", "Cài đặt", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let hide = MenuItem::with_id(&app, "mascot-hide", "Ẩn mascot", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let quit = MenuItem::with_id(&app, "mascot-quit", "Thoát", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(&app, &[&chat, &translate, &settings, &hide, &quit])
+        .map_err(|e| e.to_string())?;
+    app.get_webview_window("mascot")
+        .ok_or("Không tìm thấy mascot")?
+        .popup_menu(&menu)
+        .map_err(|e| e.to_string())
 }
 fn position_panel(
     app: &tauri::AppHandle,

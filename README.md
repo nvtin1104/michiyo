@@ -26,7 +26,7 @@ Bản trình duyệt là preview giao diện, không giả lập kết quả AI;
 ## Sử dụng
 
 - Mascot luôn trên cùng, nền trong suốt, không xuất hiện trên taskbar. Kéo nhân vật để di chuyển; thả chuột để hít vào cạnh màn hình gần nhất và lưu vị trí. Các phép tính vị trí dùng tọa độ vật lý và work area, kích thước cửa sổ dùng đơn vị logic để hỗ trợ DPI.
-- Click mascot mở Chat; nếu chưa có khóa Claude, mở Cài đặt. Tray có Hiện/Ẩn, Cài đặt, Thoát. Đóng panel sẽ ẩn cửa sổ, giữ tác vụ/hội thoại; chọn Thoát trong tray để kết thúc app.
+- Chuột trái vào mascot mở bong bóng nhỏ ngay cạnh nhân vật: nhập trực tiếp và xem câu trả lời streaming tại đó. Thiếu key sẽ báo trong bong bóng, không tự mở Cài đặt. Chuột phải mở menu Trò chuyện, Dịch văn bản, Cài đặt, Ẩn mascot và Thoát. Kéo bằng chuột trái để di chuyển. Tray có Hiện/Ẩn, Cài đặt, Thoát. Đóng bong bóng sẽ ẩn cửa sổ, giữ tác vụ/hội thoại.
 - **Ctrl+Alt+T**: bôi đen văn bản ở app khác rồi nhấn để dịch. Popup tự mở cạnh con trỏ, đổi phía và giới hạn trong màn hình. **Ctrl+Alt+C** mở Chat; **Ctrl+Alt+M** hiện/ẩn mascot. Đổi phím ở Cài đặt → Phím tắt.
 - Cài đặt → API: nhập khóa, **Lưu key**, sau đó Kiểm tra kết nối. Ô trống + Lưu key xóa khóa đã lưu. Khóa đã lưu không được đọc ngược lên UI; chỉ trả cờ có/chưa có khóa. Giá trị vừa nhập chỉ tồn tại tạm trong ô nhập và được xóa sau khi lưu.
 - Chat hỗ trợ markdown được sanitize, code block, sao chép câu trả lời, dừng stream, hội thoại mới và xóa hội thoại hiện tại. Enter gửi, Shift+Enter xuống dòng. Model mặc định `claude-haiku-5-5`, có thể chọn `claude-sonnet-5-5`; quyền dùng model phụ thuộc tài khoản Claude.
@@ -54,7 +54,7 @@ npm run test:ui
 
 Script kiểm tra nhập Chat, các tab/API key ẩn, phím tắt, lỗi khi gọi native từ preview và canvas Pixi. Ảnh QA nằm trong `artifacts/` (không commit).
 
-**Trạng thái kiểm chứng trên máy triển khai:** build frontend và kiểm tra Svelte/TypeScript đạt; test frontend và kiểm tra giao diện Chromium đạt. Rust stable đã cài, WebView2 có sẵn. `cargo check` dừng tại `link.exe not found`: máy thiếu Visual C++ Build Tools/Windows SDK và lệnh cài Build Tools đã bị chính sách thực thi chặn. Vì vậy **chưa xác nhận Rust biên dịch, chưa chạy native smoke test, chưa tạo bộ cài**. Các test HTTP mock và SSE Rust đã viết nhưng chưa chạy được trong môi trường này. Không có API key nên chưa kiểm tra chat/dịch có phí với dịch vụ thật.
+**Trạng thái kiểm chứng trên máy triển khai:** build frontend, kiểm tra Svelte/TypeScript và 6 test frontend đạt. Sau khi cài Visual C++ Build Tools, `cargo check --locked` và 5 test Rust (HTTP mock/SSE) đạt. `npm run test:mascot` kiểm tra bằng Chromium + IPC giả lập: phân biệt chuột trái/phải, không tràn viewport ở DPI 125%, focus ô nhập và hiện câu trả lời trong bong bóng. Kiểm tra này không thay cho native smoke test về trong suốt, menu hệ điều hành và nhiều màn hình. Chưa tạo bộ cài release; không có API key nên chưa kiểm tra chat/dịch có phí với dịch vụ thật.
 
 ## Kiến trúc
 

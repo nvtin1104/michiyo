@@ -12,6 +12,83 @@
 body {
   margin: 0;
 }
+html[data-view='mascot'],
+html[data-view='mascot'] body,
+html[data-view='mascot'] #app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden !important;
+  background: transparent !important;
+  border: 0;
+  box-shadow: none;
+}
+html[data-view='chat'] body:has(.bubble) {
+  overflow: hidden;
+  background: transparent;
+}
+html[data-view='mascot'][data-desktop='true'] .mascot-window {
+  width: 100vw;
+  height: 100vh;
+  transform: none !important;
+}
+html[data-view='mascot'][data-desktop='true'] .sprite,
+html[data-view='mascot'][data-desktop='true'] .sprite canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+.bubble {
+  background: transparent;
+  min-height: 0;
+  height: 100dvh;
+  padding: 6px;
+}
+.bubble .page {
+  height: 100%;
+  padding: 14px;
+  background: #faf9f2;
+  border: 1px solid #cbd5c3;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.bubble-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #385e4b;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.bubble-heading button {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  padding: 0 5px;
+}
+.bubble .messages {
+  min-height: 0;
+}
+.bubble .messages article {
+  padding: 10px;
+  margin: 8px 0;
+}
+.bubble-greeting {
+  font-size: 13px;
+  color: #7a887b;
+  margin: 4px 0 12px;
+}
+.bubble form {
+  margin-top: 8px;
+  padding: 8px;
+}
+.bubble form textarea {
+  min-height: 45px;
+  max-height: 80px;
+}
+.bubble .error {
+  max-height: 90px;
+  overflow: auto;
+  margin: 6px 0;
+}
 button,
 input,
 select,
@@ -430,5 +507,298 @@ body:has(.preview) {
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+}
+
+/* Compact settings share the chat's quiet, neutral surface. */
+.page.settings {
+  padding: 0;
+  max-width: none;
+  overflow: hidden;
+}
+.preview .page.settings {
+  height: min(580px, calc(100dvh - 90px));
+}
+.settings-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #fafaf7;
+  color: #333d36;
+}
+.settings-shell .settings-header {
+  flex: none;
+  height: 48px;
+  padding: 0 18px;
+  margin: 0;
+  border-bottom: 1px solid #e2e5dd;
+  gap: 12px;
+}
+.settings-shell .settings-header h1 {
+  font-family: 'Segoe UI', sans-serif !important;
+  font-size: 16px !important;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin: 0;
+}
+.settings-header > span {
+  font-size: 11px;
+  color: #899086;
+}
+.settings-shell .settings-layout {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+.settings-shell nav {
+  padding: 12px 8px;
+  border-right: 1px solid #e2e5dd;
+  background: #f4f5f0;
+}
+.settings-shell nav button {
+  height: 34px;
+  margin: 0 0 3px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 5px;
+  gap: 0;
+  align-items: center;
+}
+.settings-shell nav button.active {
+  background: #e5e9df;
+  color: #303e33;
+  font-weight: 600;
+}
+.settings-shell .settings-content {
+  padding: 16px 20px 12px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #c8cec2 transparent;
+  scrollbar-gutter: stable;
+  min-width: 0;
+}
+.settings-shell h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 14px;
+}
+.settings-shell label {
+  font-size: 12px;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: #555f53;
+}
+.settings-shell input:not([type='checkbox']):not([type='range']),
+.settings-shell textarea {
+  padding: 8px 10px;
+  border: 1px solid #d9ded3;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  width: 100%;
+  min-height: 34px;
+  box-shadow: none;
+}
+.settings-shell textarea {
+  resize: vertical;
+  min-height: 88px;
+  max-height: 220px;
+}
+.settings-shell input:focus,
+.settings-shell textarea:focus {
+  outline: 0;
+  border-color: #879580;
+  box-shadow: 0 0 0 2px #87958018;
+}
+.settings-shell button {
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 5px;
+}
+.settings-shell button:focus-visible {
+  outline: 2px solid #879580;
+  outline-offset: 2px;
+}
+.settings-shell button:focus:not(:focus-visible) {
+  outline: 0;
+}
+.settings-shell .check {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  min-height: 26px;
+  line-height: 1.5;
+}
+.settings-shell input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: #566950;
+  box-shadow: none;
+}
+.settings-shell input[type='range'] {
+  padding: 0;
+  height: 18px;
+  accent-color: #64765b;
+  box-shadow: none;
+}
+.settings-shell .columns {
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+.settings-shell .columns label {
+  min-width: 0;
+}
+.settings-shell .key-card {
+  padding: 10px 12px;
+  margin: 0 0 10px;
+  border-color: #e0e4da;
+  border-radius: 6px;
+  background: #fff;
+}
+.settings-shell .key-card h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.settings-shell .key-card h3 small {
+  font-size: 10px;
+  font-weight: 400;
+  color: #7c8676;
+}
+.settings-shell .key-card input {
+  margin-bottom: 8px;
+}
+.settings-shell .actions {
+  justify-content: flex-start;
+  gap: 6px;
+}
+.settings-shell .provider-row {
+  padding: 4px 0;
+  font-size: 12px;
+}
+.settings-shell .provider-row button {
+  padding: 3px 9px;
+}
+.settings-shell h3 {
+  margin: 8px 0;
+  font-size: 12px;
+}
+.settings-shell .muted {
+  margin: 8px 0;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.settings-shell footer {
+  flex: none;
+  margin: 0;
+  padding: 9px 16px;
+  border-top: 1px solid #e2e5dd;
+  gap: 12px;
+  min-height: 48px;
+  background: #fafaf7;
+  font-size: 11px;
+}
+.settings-shell footer > span {
+  letter-spacing: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.settings-shell footer button {
+  flex-shrink: 0;
+  background: transparent;
+}
+.custom-select {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.custom-select .select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #d9ded3;
+  border-radius: 5px;
+  gap: 12px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #333d36;
+}
+.select-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-trigger svg {
+  flex-shrink: 0;
+  color: #879080;
+}
+.custom-select .select-trigger:hover {
+  border-color: #aab5a2;
+  background: #fff;
+}
+.custom-select .select-trigger:focus-visible,
+.custom-select .select-trigger[aria-expanded='true'] {
+  outline: 0;
+  border-color: #879580;
+  box-shadow: 0 0 0 2px #87958018;
+}
+.select-list {
+  position: fixed;
+  z-index: 1000;
+  padding: 4px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  border: 1px solid #d4dbce;
+  border-radius: 7px;
+  box-shadow: 0 5px 16px #28332614;
+  scrollbar-width: thin;
+  scrollbar-color: #c8cec2 transparent;
+}
+.select-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 0;
+  background: transparent;
+  color: #3c4737;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 12px;
+}
+.select-list button.highlighted {
+  background: #edf0e8;
+}
+.select-list button[aria-selected='true'] {
+  font-weight: 600;
+}
+@media (max-width: 520px) {
+  .settings-shell .settings-layout {
+    grid-template-columns: 100px minmax(0, 1fr);
+  }
+  .settings-shell .settings-content {
+    padding: 14px 12px;
+  }
+  .settings-shell .columns {
+    flex-wrap: wrap;
+  }
+  .settings-shell .columns label {
+    flex: 1 1 100px;
   }
 }
