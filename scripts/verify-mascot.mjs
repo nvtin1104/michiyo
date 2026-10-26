@@ -14,6 +14,8 @@ try {
     const callbacks = new Map(),
       events = new Map();
     window.calls = [];
+    window.emitMockEvent = (event, payload) =>
+      callbacks.get(events.get(event))?.({ payload });
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
     window.__TAURI_INTERNALS__ = {
       metadata: {
@@ -32,17 +34,30 @@ try {
         if (command !== 'set_hit_mask') window.calls.push({ command, args });
         if (command === 'plugin:store|load') return 1;
         if (command === 'plugin:store|get') return [null, false];
-        if (command === 'secret_status') return { claude: false };
+        if (command === 'secret_status')
+          return { claude: !!window.hasClaudeKey };
         if (command === 'plugin:event|listen') {
           events.set(args.event, args.handler);
           return args.handler;
         }
         if (command === 'chat') {
+          if (window.chatError) throw window.chatError;
           const handler = events.get('chat-delta');
+          if (window.streamChunks) {
+            const [first, ...remaining] = window.streamChunks;
+            callbacks.get(handler)?.({ payload: { id: args.id, text: first } });
+            await new Promise((resolve) => (window.finishMockStream = resolve));
+            for (const text of remaining)
+              callbacks.get(handler)?.({ payload: { id: args.id, text } });
+            return null;
+          }
           callbacks.get(handler)?.({
             payload: {
               id: args.id,
-              text: 'Câu trả lời kiểm thử ngay trong bong bóng.',
+              text:
+                args.messages.length > 1
+                  ? 'Câu trả lời mới nhất.'
+                  : 'Câu trả lời kiểm thử ngay trong bong bóng.',
             },
           });
         }
@@ -52,6 +67,20 @@ try {
   });
   await page.goto('http://127.0.0.1:1420/?view=mascot');
   await page.locator('canvas').waitFor();
+  await page.keyboard.press('Tab');
+  assert.equal(
+    await page
+      .locator('.mascot-window')
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  assert.equal(
+    await page
+      .locator('.mascot-window')
+      .evaluate((el) => getComputedStyle(el).outlineStyle),
+    'none',
+  );
+  assert.equal(await page.locator('.mascot-hint').count(), 0);
   await page.mouse.click(80, 80, { button: 'right' });
   assert.equal(
     await page.evaluate(
@@ -98,7 +127,161 @@ try {
     await page.getByRole('heading', { name: /Trò chuyện/ }).count(),
     0,
   );
+  assert.equal(await page.locator('.messages article').count(), 1);
+  assert.equal(await page.locator('.messages article.user').count(), 0);
+  assert.ok((await input.boundingBox()).height <= 36);
+  await input.fill('Câu hỏi tiếp');
+  await input.press('Enter');
+  await page.getByText('Câu trả lời mới nhất.', { exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByText('Câu trả lời kiểm thử ngay trong bong bóng.', { exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(await page.locator('.messages article').count(), 1);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.calls.filter((c) => c.command === 'chat').at(-1).args.messages
+          .length,
+    ),
+    3,
+  );
+  await page.waitForTimeout(150);
+  assert.ok(
+    await page.evaluate(() =>
+      window.calls.some(
+        (c) => c.command === 'resize_chat' && c.args.height < 180,
+      ),
+    ),
+  );
+  const height = await page
+    .locator('.page')
+    .evaluate((el) => Math.ceil(el.getBoundingClientRect().height) + 8);
+  await page.setViewportSize({ width: 320, height });
+  assert.equal(
+    await page
+      .locator('.bubble .page')
+      .evaluate((el) => getComputedStyle(el).backgroundColor),
+    'rgba(0, 0, 0, 0)',
+  );
+  assert.equal(
+    await page
+      .locator('.bubble .page')
+      .evaluate((el) => getComputedStyle(el).borderTopWidth),
+    '0px',
+  );
+  await page.addStyleTag({ content: 'html{background:#242424!important}' });
   await page.screenshot({ path: 'artifacts/chat-bubble.png' });
+  await page.evaluate(
+    () =>
+      (window.streamChunks = [
+        'Chào bạn',
+        '! Mình có thể giúp gì cho bạn hôm nay?',
+      ]),
+  );
+  await input.fill('Nói chuyện với mình');
+  await input.press('Enter');
+  await page.getByText('Chào bạn', { exact: true }).waitFor();
+  await page.getByText('Đang trả lời', { exact: true }).waitFor();
+  assert.equal(await page.locator('article.streaming').count(), 1);
+  assert.equal(
+    await page.getByRole('button', { name: 'Dừng trả lời' }).count(),
+    1,
+  );
+  assert.equal(
+    await page.getByText('✦ Michiyo đang suy nghĩ…', { exact: true }).count(),
+    0,
+  );
+  const streamHeight = await page
+    .locator('.page')
+    .evaluate((el) => Math.ceil(el.getBoundingClientRect().height) + 4);
+  await page.setViewportSize({ width: 320, height: streamHeight });
+  await page.screenshot({ path: 'artifacts/chat-streaming.png' });
+  await page.evaluate(() => window.finishMockStream());
+  await page
+    .getByText('Chào bạn! Mình có thể giúp gì cho bạn hôm nay?', {
+      exact: true,
+    })
+    .waitFor();
+  await page.locator('article.streaming').waitFor({ state: 'detached' });
+  assert.equal(
+    await page.getByRole('button', { name: 'Sao chép câu trả lời' }).count(),
+    1,
+  );
+  await page.evaluate(() => (window.streamChunks = null));
+  const savedBefore = await page.evaluate(
+    () => window.calls.filter((c) => c.command === 'plugin:store|set').length,
+  );
+  await page.evaluate(
+    () => (window.chatError = 'Chưa có API key cho claude. Hãy mở Cài đặt.'),
+  );
+  await input.fill('Giữ lại tin nhắn này');
+  await input.press('Enter');
+  await page
+    .getByText('Thêm Claude API key để trò chuyện.', { exact: true })
+    .waitFor();
+  assert.equal(await input.inputValue(), 'Giữ lại tin nhắn này');
+  assert.equal(await page.getByRole('alert').count(), 0);
+  assert.equal(
+    await page
+      .locator('.chat-notice')
+      .evaluate((el) => el.scrollHeight > el.clientHeight),
+    false,
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.calls.filter((c) => c.command === 'plugin:store|set').length,
+    ),
+    savedBefore,
+  );
+  const noticeHeight = await page
+    .locator('.page')
+    .evaluate((el) => Math.ceil(el.getBoundingClientRect().height) + 4);
+  await page.setViewportSize({ width: 320, height: noticeHeight });
+  await page.screenshot({ path: 'artifacts/chat-key-notice.png' });
+  await page.evaluate(() => {
+    window.hasClaudeKey = true;
+    window.emitMockEvent('secrets-changed');
+  });
+  await page.locator('.chat-notice').waitFor({ state: 'detached' });
+  await page.setViewportSize({ width: 156, height: 160 });
+  await page.goto('http://127.0.0.1:1420/?view=menu');
+  const menu = page.getByRole('menu');
+  await menu.waitFor();
+  assert.equal(await page.getByRole('menuitem').count(), 5);
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute('role') === 'menuitem',
+  );
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent?.trim()),
+    'Cài đặt',
+  );
+  await page.keyboard.press('Enter');
+  assert.equal(
+    await page.evaluate(
+      () => window.calls.find((c) => c.command === 'menu_action')?.args.action,
+    ),
+    'settings',
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollHeight > innerHeight ||
+        document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  await page.screenshot({ path: 'artifacts/pet-context-menu.png' });
+  await page.keyboard.press('Escape');
+  assert.ok(
+    await page.evaluate(() =>
+      window.calls.some((c) => c.command === 'plugin:window|hide'),
+    ),
+  );
   assert.deepEqual(errors, []);
   console.log(
     'PASS: right click only opens menu; left click opens chat without a key; no mascot overflow; composer autofocus and streamed answer in compact bubble (mock IPC).',

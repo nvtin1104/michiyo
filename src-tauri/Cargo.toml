@@ -13,9 +13,8 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
-tokio = { version = "1", features = ["time", "sync", "macros", "rt-multi-thread"] }
-futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["time", "sync", "macros", "rt-multi-thread", "process", "io-util"] }
 keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
 async-trait = "0.1"
 lru = "0.12"
@@ -25,7 +24,7 @@ whatlang = "0.16"
 base64 = "0.22"
 isolang = "2"
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
 [dev-dependencies]
 wiremock = "0.6"
 [profile.release]

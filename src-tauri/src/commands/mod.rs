@@ -4,7 +4,6 @@ use crate::{
     providers::{Provider, Translation, Translator},
     secrets,
 };
-use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -122,6 +121,7 @@ pub async fn translate(
             name: name.clone(),
             client: state.client.clone(),
             base: None,
+            app: Some(app.clone()),
         };
         match p.translate(&text, &src, &tgt, &c).await {
             Ok(output) => {
@@ -161,53 +161,15 @@ pub async fn chat(
     }
     let outcome = async {
         let c = config::read(&app)?;
-        let key = secrets::get("claude")?;
-        let _ = app.emit("mascot-state", "thinking");
-        let request = state
-            .client
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", key)
-            .header("anthropic-version", "2023-06-01")
-            .json(&json!({
-                "model":config::string(&c,"model","claude-haiku-5-5"),
-                "system":config::string(&c,"systemPrompt","You are Michiyo."),
-                "max_tokens":c["maxTokens"].as_u64().unwrap_or(2048).clamp(1,16384),
-                "messages":messages,"stream":true
-            }))
-            .send();
-        let response = tokio::select! {
-            _=cancel.notified()=>return Ok(()),
-            r=request=>r.map_err(|_|"Không kết nối được Claude")?
-        };
-        if !response.status().is_success() {
-            return Err(format!(
-                "Claude HTTP {}. Kiểm tra API key, model và hạn mức.",
-                response.status().as_u16()
-            ));
-        }
-        let mut stream = response.bytes_stream();
-        let mut decoder = crate::providers::sse::Decoder::default();
-        loop {
-            let chunk =
-                tokio::select! {_=cancel.notified()=>return Ok(()),chunk=stream.next()=>chunk};
-            let Some(chunk) = chunk else {
-                return Err("Claude đóng kết nối trước khi hoàn tất. Có thể thử gửi lại.".into());
-            };
-            for event in decoder.push(&chunk.map_err(|_| "Kết nối streaming bị gián đoạn")?)?
-            {
-                match event["type"].as_str() {
-                    Some("error") => return Err("Claude báo lỗi trong luồng phản hồi".into()),
-                    Some("message_stop") => return Ok(()),
-                    Some("content_block_delta") => {
-                        if let Some(text) = event["delta"]["text"].as_str() {
-                            let _ = app.emit_to("chat", "chat-delta", json!({"id":id,"text":text}));
-                            let _ = app.emit("mascot-state", "talking");
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        let _=app.emit("mascot-state","thinking");
+        if !messages.is_array()||messages.as_array().is_some_and(|a|a.is_empty()||a.len()>1000)||messages.to_string().len()>1_000_000{return Err("Hội thoại quá dài. Hãy tạo cuộc trò chuyện mới.".into())}
+        let request=json!({"action":"chat","model":config::string(&c,"model","claude-haiku-5-5"),
+            "system":config::string(&c,"systemPrompt","You are Michiyo, a friendly conversational companion."),
+            "maxTokens":c["maxTokens"].as_u64().unwrap_or(2048).clamp(1,16384),"messages":messages});
+        crate::providers::agent::run(&app,request,cancel.clone(),|text|{
+            let _=app.emit_to("chat","chat-delta",json!({"id":id,"text":text}));
+            let _=app.emit("mascot-state","talking");
+        }).await.map(|_|())
     }
     .await;
     state.jobs.lock().unwrap().remove(&id);
@@ -230,20 +192,14 @@ pub async fn test_connection(
     name: String,
 ) -> Result<String, String> {
     if name == "claude" {
-        let response = state
-            .client
-            .get("https://api.anthropic.com/v1/models")
-            .header("x-api-key", secrets::get("claude")?)
-            .header("anthropic-version", "2023-06-01")
-            .send()
-            .await
-            .map_err(|_| "Không kết nối được Claude")?;
-        crate::providers::checked(response).await?;
+        let c = config::read(&app)?;
+        crate::providers::agent::run(&app,json!({"action":"check","model":config::string(&c,"model","claude-haiku-5-5"),"system":"Reply only OK.","maxTokens":32,"messages":[{"role":"user","content":"Reply OK"}]}),Arc::new(tokio::sync::Notify::new()),|_|{}).await?;
     } else {
         let p = Provider {
             name,
             client: state.client.clone(),
             base: None,
+            app: Some(app.clone()),
         };
         p.translate("Hello", "en", "vi", &config::read(&app)?)
             .await?;
@@ -255,9 +211,10 @@ pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(
         w
     } else {
         let (title, width, height) = match label {
-            "chat" => ("Michiyo · Chat", 360., 340.),
+            "chat" => ("Michiyo · Chat", 320., 44.),
             "translate" => ("Michiyo · Dịch", 420., 400.),
             "settings" => ("Michiyo · Cài đặt", 720., 540.),
+            "menu" => ("Michiyo · Menu", 156., 160.),
             _ => return Err("Cửa sổ không hợp lệ".into()),
         };
         tauri::WebviewWindowBuilder::new(
@@ -269,40 +226,72 @@ pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(
         .inner_size(width, height)
         .visible(false)
         .always_on_top(label != "settings")
-        .decorations(label != "chat")
-        .transparent(label == "chat")
-        .shadow(label != "chat")
-        .skip_taskbar(label == "chat")
+        .decorations(!matches!(label, "chat" | "menu"))
+        .transparent(matches!(label, "chat" | "menu"))
+        .shadow(!matches!(label, "chat" | "menu"))
+        .skip_taskbar(matches!(label, "chat" | "menu"))
+        .resizable(!matches!(label, "chat" | "menu"))
         .build()
         .map_err(|e| e.to_string())?
     };
-    position_panel(app, &window, cursor)?;
+    position_panel(app, &window, cursor || label == "menu")?;
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    if label == "menu" {
+        let _ = app.emit_to("menu", "menu-focus", ());
+    }
     if label == "chat" {
         let _ = app.emit_to("chat", "chat-focus", ());
     }
     Ok(())
 }
 #[tauri::command]
+pub fn resize_chat(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+    if !height.is_finite() {
+        return Err("Chiều cao không hợp lệ".into());
+    }
+    if let Some(window) = app.get_webview_window("chat") {
+        let height = height.clamp(40., 304.);
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        if (size.height as f64 - height * scale).abs() > 1.
+            || (size.width as f64 - 320. * scale).abs() > 1.
+        {
+            window
+                .set_size(tauri::LogicalSize::new(320., height))
+                .map_err(|e| e.to_string())?;
+        }
+        position_panel(&app, &window, false)?;
+    }
+    Ok(())
+}
+#[tauri::command]
 pub async fn mascot_menu(app: tauri::AppHandle) -> Result<(), String> {
-    use tauri::menu::{Menu, MenuItem};
-    let chat = MenuItem::with_id(&app, "mascot-chat", "Trò chuyện", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let translate = MenuItem::with_id(&app, "mascot-translate", "Dịch văn bản", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let settings = MenuItem::with_id(&app, "mascot-settings", "Cài đặt", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let hide = MenuItem::with_id(&app, "mascot-hide", "Ẩn mascot", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let quit = MenuItem::with_id(&app, "mascot-quit", "Thoát", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let menu = Menu::with_items(&app, &[&chat, &translate, &settings, &hide, &quit])
-        .map_err(|e| e.to_string())?;
-    app.get_webview_window("mascot")
-        .ok_or("Không tìm thấy mascot")?
-        .popup_menu(&menu)
-        .map_err(|e| e.to_string())
+    show_panel(&app, "menu", true)
+}
+#[tauri::command]
+pub async fn menu_action(app: tauri::AppHandle, action: String) -> Result<(), String> {
+    if let Some(menu) = app.get_webview_window("menu") {
+        let _ = menu.hide();
+    }
+    match action.as_str() {
+        "chat" | "translate" | "settings" => show_panel(&app, &action, false),
+        "hide" => {
+            if let Some(w) = app.get_webview_window("mascot") {
+                w.hide().map_err(|e| e.to_string())?;
+                let _ = app.emit_to("mascot", "mascot-visible", false);
+            }
+            if let Some(w) = app.get_webview_window("chat") {
+                let _ = w.hide();
+            }
+            Ok(())
+        }
+        "quit" => {
+            app.exit(0);
+            Ok(())
+        }
+        _ => Err("Thao tác không hợp lệ".into()),
+    }
 }
 fn position_panel(
     app: &tauri::AppHandle,
@@ -327,6 +316,74 @@ fn position_panel(
         let origin = &area.position;
         let size = &area.size;
         let ws = window.outer_size().map_err(|e| e.to_string())?;
+        if window.label() == "menu" {
+            let gap = 4. * m.scale_factor();
+            let x = (point.x + gap).clamp(
+                origin.x as f64,
+                (origin.x as f64 + size.width as f64 - ws.width as f64).max(origin.x as f64),
+            );
+            let y = (point.y + gap).clamp(
+                origin.y as f64,
+                (origin.y as f64 + size.height as f64 - ws.height as f64).max(origin.y as f64),
+            );
+            window
+                .set_position(tauri::PhysicalPosition::new(x as i32, y as i32))
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        if window.label() == "chat" && !cursor {
+            // Attach to visible sprite pixels, not the transparent 160×160 canvas margin.
+            let mascot_size = mascot.inner_size().map_err(|e| e.to_string())?;
+            let state = app.state::<Runtime>();
+            let mask = state.mask.lock().unwrap();
+            let mut left = 160;
+            let mut right = 0;
+            let mut bottom = 0;
+            for (index, opaque) in mask.iter().enumerate() {
+                if *opaque {
+                    left = left.min(index % 160);
+                    right = right.max(index % 160 + 1);
+                    bottom = bottom.max(index / 160 + 1);
+                }
+            }
+            if bottom == 0 {
+                left = 48;
+                right = 112;
+                bottom = 133;
+            }
+            let pet_left = point.x + left as f64 * mascot_size.width as f64 / 160.;
+            let pet_right = point.x + right as f64 * mascot_size.width as f64 / 160.;
+            let pet_bottom = point.y + bottom as f64 * mascot_size.height as f64 / 160.;
+            let gap = 4. * m.scale_factor();
+            let opens_right =
+                pet_right + gap + ws.width as f64 <= origin.x as f64 + size.width as f64;
+            let x = if pet_right + gap + ws.width as f64 <= origin.x as f64 + size.width as f64 {
+                pet_right + gap
+            } else {
+                pet_left - gap - ws.width as f64
+            };
+            let y = pet_bottom - ws.height as f64;
+            window
+                .set_position(tauri::PhysicalPosition::new(
+                    x.clamp(
+                        origin.x as f64,
+                        (origin.x as f64 + size.width as f64 - ws.width as f64)
+                            .max(origin.x as f64),
+                    ) as i32,
+                    y.clamp(
+                        origin.y as f64,
+                        (origin.y as f64 + size.height as f64 - ws.height as f64)
+                            .max(origin.y as f64),
+                    ) as i32,
+                ))
+                .map_err(|e| e.to_string())?;
+            let _ = app.emit_to(
+                "chat",
+                "chat-placement",
+                if opens_right { "right" } else { "left" },
+            );
+            return Ok(());
+        }
         let x = if point.x
             + mascot.outer_size().map_err(|e| e.to_string())?.width as f64
             + 12.
@@ -355,50 +412,15 @@ pub async fn open_panel(app: tauri::AppHandle, label: String) -> Result<(), Stri
     }
     show_panel(&app, &label, false)
 }
-#[tauri::command]
-pub fn snap_mascot(app: tauri::AppHandle) -> Result<(), String> {
+pub fn save_mascot_position(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_store::StoreExt;
-    let w = app.get_webview_window("mascot").unwrap();
+    let w = app
+        .get_webview_window("mascot")
+        .ok_or("Không tìm thấy mascot")?;
     let p = w.outer_position().map_err(|e| e.to_string())?;
-    if let Some(m) = w
-        .current_monitor()
-        .map_err(|e| e.to_string())?
-        .or(w.primary_monitor().map_err(|e| e.to_string())?)
-    {
-        let area = m.work_area();
-        let o = &area.position;
-        let s = &area.size;
-        let ws = w.outer_size().map_err(|e| e.to_string())?;
-        let right = o.x + s.width as i32 - ws.width as i32;
-        let bottom = o.y + s.height as i32 - ws.height as i32;
-        let distances = [
-            (p.x - o.x).abs(),
-            (right - p.x).abs(),
-            (p.y - o.y).abs(),
-            (bottom - p.y).abs(),
-        ];
-        let edge = distances
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, d)| *d)
-            .unwrap()
-            .0;
-        let mut x = p.x.clamp(o.x, right.max(o.x));
-        let mut y = p.y.clamp(o.y, bottom.max(o.y));
-        match edge {
-            0 => x = o.x,
-            1 => x = right,
-            2 => y = o.y,
-            _ => y = bottom,
-        }
-        if p.x != x || p.y != y {
-            w.set_position(tauri::PhysicalPosition::new(x, y))
-                .map_err(|e| e.to_string())?;
-        }
-        let store = app.store("settings.json").map_err(|e| e.to_string())?;
-        store.set("position", json!({"x":x,"y":y}));
-        store.save().map_err(|e| e.to_string())?;
-    }
+    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    store.set("position", json!({"x":p.x,"y":p.y}));
+    store.save().map_err(|e| e.to_string())?;
     if let Some(chat) = app.get_webview_window("chat") {
         if chat.is_visible().unwrap_or(false) {
             position_panel(&app, &chat, false)?;

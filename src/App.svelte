@@ -14,7 +14,6 @@
   let config: Config = structuredClone(defaults);
   let state: State = 'idle';
   let error = '';
-  let keyMissing = false;
   const machine = new MascotMachine();
   let moved = false;
   let start = { x: 0, y: 0 };
@@ -57,19 +56,12 @@
   onMount(() => {
     let off: undefined | (() => void);
     let offConfig: undefined | (() => void);
-    let offSecret: undefined | (() => void);
     reload();
     if (desktop) {
       listen<State>('mascot-state', (e) => {
         state = machine.transition(e.payload);
       }).then((f) => (off = f));
       listen('config-changed', reload).then((f) => (offConfig = f));
-      const updateKey = () =>
-        call<Record<string, boolean>>('secret_status').then(
-          (s) => (keyMissing = !s.claude),
-        );
-      listen('secrets-changed', updateKey).then((f) => (offSecret = f));
-      updateKey();
     }
     const timer = setInterval(
       () => (state = machine.tick(Date.now(), config.sleepMinutes)),
@@ -78,7 +70,6 @@
     return () => {
       off?.();
       offConfig?.();
-      offSecret?.();
       clearInterval(timer);
     };
   });
@@ -136,9 +127,14 @@
         speed={config.animationSpeed}
         reduced={config.reducedMotion ||
           matchMedia('(prefers-reduced-motion: reduce)').matches}
-      />{/await}{#if keyMissing}<span class="mascot-hint">⚿</span>{/if}
+      />{/await}
   </div>
-{:else}<main class:preview={!desktop} class:bubble={desktop && view === 'chat'}>
+{:else if view === 'menu'}{#await import('./mascot/ContextMenu.svelte') then module}<svelte:component
+      this={module.default}
+    />{/await}{:else}<main
+    class:preview={!desktop}
+    class:bubble={desktop && view === 'chat'}
+  >
     {#if !desktop}<div class="preview-bar">
         <span>MICHIYO · BẢN XEM TRƯỚC</span>
         <div>

@@ -1,6 +1,6 @@
 {
   "identifier": "desktop",
-  "windows": ["mascot", "chat", "translate", "settings"],
+  "windows": ["mascot", "chat", "translate", "settings", "menu"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
