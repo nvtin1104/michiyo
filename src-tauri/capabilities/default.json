@@ -1,0 +1,13 @@
+{
+  "identifier": "desktop",
+  "windows": ["mascot", "chat", "translate", "settings"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "store:default",
+    "clipboard-manager:allow-write-text",
+    "autostart:default"
+  ]
+}

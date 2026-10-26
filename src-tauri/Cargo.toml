@@ -1,0 +1,36 @@
+[package]
+name = "michiyo"
+version = "0.1.0"
+edition = "2021"
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-store = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+tokio = { version = "1", features = ["time", "sync", "macros", "rt-multi-thread"] }
+futures-util = "0.3"
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
+async-trait = "0.1"
+lru = "0.12"
+arboard = "3"
+enigo = "0.2"
+whatlang = "0.16"
+base64 = "0.22"
+isolang = "2"
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+[dev-dependencies]
+wiremock = "0.6"
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
