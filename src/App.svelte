@@ -221,6 +221,11 @@
           matchMedia('(prefers-reduced-motion: reduce)').matches}
       />{/await}
   </div>
+{:else if view === 'main'}{#await import('./shell/Shell.svelte') then module}<svelte:component
+      this={module.default}
+      bind:config
+      {save}
+    />{/await}
 {:else if view === 'menu'}{#await import('./mascot/ContextMenu.svelte') then module}<svelte:component
       this={module.default}
     />{/await}{:else}<main
@@ -243,6 +248,7 @@
             {save}
           />{/await}{:else if view === 'translate'}{#await import('./translate/Translate.svelte') then module}<svelte:component
             this={module.default}
+            compact={desktop}
           />{/await}{:else}{#await import('./chat/Chat.svelte') then module}<svelte:component
             this={module.default}
             {config}

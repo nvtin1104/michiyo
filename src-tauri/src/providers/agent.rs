@@ -87,7 +87,7 @@ pub async fn run(
     app: &tauri::AppHandle,
     mut request: Value,
     cancel: Arc<Notify>,
-    on_delta: impl Fn(&str) + Send,
+    mut on_delta: impl FnMut(&str) + Send,
 ) -> Result<String, String> {
     let directory = directory(app)?;
     let node = directory.join(if cfg!(windows) { "node.exe" } else { "node" });

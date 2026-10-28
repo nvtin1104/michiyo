@@ -12,6 +12,7 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 pub struct Runtime {
+    pub history_lock: Mutex<()>,
     pub client: reqwest::Client,
     pub cache: Mutex<lru::LruCache<String, Translation>>,
     pub jobs: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
@@ -19,6 +20,8 @@ pub struct Runtime {
     pub shortcuts: Mutex<Vec<(String, &'static str)>>,
     pub capturing: std::sync::atomic::AtomicBool,
     pub pending_selection: Mutex<Option<String>>,
+    pub pending_translation_draft: Mutex<Option<Value>>,
+    pub pending_shell_chat_draft: Mutex<Option<Value>>,
     pub pending_capture_error: Mutex<Option<String>>,
     pub ignored_clipboard: Mutex<Option<String>>,
     pub pending_chat: Mutex<Option<String>>,
@@ -28,6 +31,7 @@ pub struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
+            history_lock: Mutex::new(()),
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .timeout(std::time::Duration::from_secs(60))
@@ -40,11 +44,22 @@ impl Default for Runtime {
             shortcuts: Mutex::new(Vec::new()),
             capturing: std::sync::atomic::AtomicBool::new(false),
             pending_selection: Mutex::new(None),
+            pending_translation_draft: Mutex::new(None),
+            pending_shell_chat_draft: Mutex::new(None),
             pending_capture_error: Mutex::new(None),
             ignored_clipboard: Mutex::new(None),
             pending_chat: Mutex::new(None),
             anchor: Mutex::new(None),
             move_generation: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+fn record_activity(app: &tauri::AppHandle, state: &Runtime, kind: &str, data: Value) {
+    if let Ok(_guard) = state.history_lock.lock() {
+        if let Ok(mut db) = local_db(app) {
+            if crate::db::activity::record(&mut db, kind, data).is_ok() {
+                let _ = app.emit("activity-changed", ());
+            }
         }
     }
 }
@@ -64,7 +79,7 @@ pub fn save_secret(app: tauri::AppHandle, name: String, value: String) -> Result
 }
 #[tauri::command]
 pub fn secret_status() -> Value {
-    json!({"claude":secrets::get("claude").is_ok(),"google":secrets::get("google").is_ok(),"libre":secrets::get("libre").is_ok()})
+    json!({"claude":secrets::get("claude").is_ok(),"google":secrets::get("google").is_ok(),"libre":secrets::get("libre").is_ok(),"openai":secrets::get("openai").is_ok(),"cloud":secrets::get("cloud").is_ok()})
 }
 #[tauri::command]
 pub async fn translate(
@@ -101,8 +116,15 @@ pub async fn translate(
         target
     };
     let key = format!("{text}|{src}|{tgt}|{c}|{engine:?}");
-    if let Some(result) = state.cache.lock().unwrap().get(&key) {
-        return Ok(result.clone());
+    let cached = state.cache.lock().unwrap().get(&key).cloned();
+    if let Some(result) = cached {
+        record_activity(
+            &app,
+            &state,
+            "translation",
+            json!({"engine": result.engine}),
+        );
+        return Ok(result);
     }
     let names = engine.map(|e| vec![e]).unwrap_or_else(|| {
         c["providers"]
@@ -114,6 +136,13 @@ pub async fn translate(
             })
             .unwrap_or(vec!["mymemory".into()])
     });
+    let names: Vec<String> = names
+        .into_iter()
+        .filter(|name| crate::ai::translator_allowed(&c, name))
+        .collect();
+    if names.is_empty() {
+        return Err("Chế độ Offline: không có engine dịch chạy trên máy này. Hãy dùng LibreTranslate trên localhost hoặc đổi chế độ.".into());
+    }
     let mut errors = vec![];
     let _ = app.emit("mascot-state", "thinking");
     for name in names {
@@ -132,6 +161,12 @@ pub async fn translate(
                     target: tgt,
                 };
                 state.cache.lock().unwrap().put(key, result.clone());
+                record_activity(
+                    &app,
+                    &state,
+                    "translation",
+                    json!({"engine": result.engine}),
+                );
                 let _ = app.emit("mascot-state", "happy");
                 return Ok(result);
             }
@@ -147,6 +182,7 @@ pub async fn translate(
 #[tauri::command]
 pub async fn chat(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, Runtime>,
     id: String,
     messages: Value,
@@ -166,12 +202,41 @@ pub async fn chat(
         let request=json!({"action":"chat","model":config::string(&c,"model","claude-haiku-5-5"),
             "system":config::string(&c,"systemPrompt","You are Michiyo, a friendly conversational companion."),
             "maxTokens":c["maxTokens"].as_u64().unwrap_or(2048).clamp(1,16384),"messages":messages});
-        crate::providers::agent::run(&app,request,cancel.clone(),|text|{
-            let _=app.emit_to("chat","chat-delta",json!({"id":id,"text":text}));
-            let _=app.emit("mascot-state","talking");
-        }).await.map(|_|())
+        let backends = crate::ai::plan(&c)?;
+        let system = config::string(&c,"systemPrompt","You are Michiyo, a friendly conversational companion.");
+        let max_tokens = c["maxTokens"].as_u64().unwrap_or(2048).clamp(1,16384);
+        let mut last_error = String::new();
+        let mut sent_any = false;
+        for backend in backends {
+            let mut on_delta = |text: &str| {
+                sent_any = true;
+                let _=app.emit_to(window.label(),"chat-delta",json!({"id":id,"text":text}));
+                let _=app.emit("mascot-state","talking");
+            };
+            let result = match &backend {
+                crate::ai::Backend::Claude{..} => crate::providers::agent::run(&app,request.clone(),cancel.clone(),|text|on_delta(text)).await.map(|_|()),
+                crate::ai::Backend::OpenAi{base,model,use_key} => {
+                    let key = if *use_key { secrets::get("openai").ok() } else { None };
+                    crate::ai::stream_chat(&state.client,base,key.as_deref(),model,&system,&messages,max_tokens,cancel.clone(),|text|on_delta(text)).await
+                }
+                crate::ai::Backend::Cloudflare{base,model} => {
+                    let key = secrets::get("cloud").ok();
+                    crate::ai::stream_chat(&state.client,base,key.as_deref(),model,&system,&messages,max_tokens,cancel.clone(),|text|on_delta(text)).await
+                }
+            };
+            match result {
+                Ok(()) => return Ok(()),
+                // Falling back mid-answer would splice two models together.
+                Err(e) if sent_any => return Err(e),
+                Err(e) => last_error = e,
+            }
+        }
+        Err(last_error)
     }
     .await;
+    if outcome.is_ok() {
+        record_activity(&app, &state, "chat", json!({}));
+    }
     state.jobs.lock().unwrap().remove(&id);
     let _ = app.emit(
         "mascot-state",
@@ -184,6 +249,130 @@ pub fn stop_chat(state: tauri::State<'_, Runtime>, id: String) {
     if let Some(job) = state.jobs.lock().unwrap().get(&id) {
         job.notify_one();
     }
+}
+/// One-shot completion through the configured router (same mode rules as chat).
+async fn complete_once(
+    app: &tauri::AppHandle,
+    state: &Runtime,
+    system: &str,
+    user: &str,
+    max_tokens: u64,
+) -> Result<String, String> {
+    let c = config::read(app)?;
+    let messages = json!([{"role": "user", "content": user}]);
+    let mut last_error = String::new();
+    for backend in crate::ai::plan(&c)? {
+        let mut out = String::new();
+        let cancel = Arc::new(tokio::sync::Notify::new());
+        let result = match &backend {
+            crate::ai::Backend::Claude { model } => crate::providers::agent::run(
+                app,
+                json!({"action":"chat","model":model,"system":system,"maxTokens":max_tokens,"messages":messages}),
+                cancel,
+                |text| out.push_str(text),
+            )
+            .await
+            .map(|full| {
+                if out.is_empty() {
+                    out = full;
+                }
+            }),
+            crate::ai::Backend::OpenAi { base, model, use_key } => {
+                let key = if *use_key { secrets::get("openai").ok() } else { None };
+                crate::ai::stream_chat(&state.client, base, key.as_deref(), model, system, &messages, max_tokens, cancel, |text| out.push_str(text)).await
+            }
+            crate::ai::Backend::Cloudflare { base, model } => {
+                let key = secrets::get("cloud").ok();
+                crate::ai::stream_chat(&state.client, base, key.as_deref(), model, system, &messages, max_tokens, cancel, |text| out.push_str(text)).await
+            }
+        };
+        match result {
+            Ok(()) if !out.trim().is_empty() => return Ok(out),
+            Ok(()) => last_error = "Model không trả về nội dung".into(),
+            Err(e) => last_error = e,
+        }
+    }
+    Err(last_error)
+}
+#[tauri::command]
+pub async fn ai_summarize(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    text: String,
+) -> Result<String, String> {
+    if text.trim().is_empty() || text.chars().count() > 20_000 {
+        return Err("Hãy chọn nội dung từ 1 đến 20.000 ký tự".into());
+    }
+    complete_once(&app, &state, crate::ai::actions::SUMMARY_SYSTEM, &text, 600).await
+}
+/// `now_local` is the UI's local time (`YYYY-MM-DD HH:MM`) so relative dates like "mai" resolve correctly.
+#[tauri::command]
+pub async fn ai_suggest_actions(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    text: String,
+    now_local: String,
+) -> Result<Vec<crate::ai::actions::Suggestion>, String> {
+    if text.trim().is_empty() || text.chars().count() > 8_000 {
+        return Err("Hãy chọn nội dung từ 1 đến 8.000 ký tự".into());
+    }
+    if now_local.len() != 16 || !now_local.is_ascii() {
+        return Err("Thời gian không hợp lệ".into());
+    }
+    let raw = complete_once(&app, &state, &crate::ai::actions::suggest_system(&now_local), &text, 800).await?;
+    Ok(crate::ai::actions::parse_suggestions(&raw))
+}
+/// Exchanges a pairing code from the admin site for a device token kept in the OS keychain.
+#[tauri::command]
+pub async fn cloud_pair(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    url: String,
+    code: String,
+) -> Result<String, String> {
+    let url = url.trim().trim_end_matches('/').to_string();
+    crate::ai::validate_base(&url)?;
+    if code.trim().is_empty() || code.len() > 32 {
+        return Err("Hãy nhập mã ghép nối".into());
+    }
+    let response = state
+        .client
+        .post(format!("{url}/v1/pair/complete"))
+        .json(&json!({"code": code.trim(), "device_name": "Michiyo Desktop"}))
+        .send()
+        .await
+        .map_err(|_| "Không kết nối được Michiyo Cloud. Hãy kiểm tra địa chỉ.".to_string())?;
+    match response.status().as_u16() {
+        200 => {}
+        400 => return Err("Mã ghép nối sai hoặc đã hết hạn".into()),
+        429 => return Err("Thử quá nhiều lần. Hãy đợi vài phút.".into()),
+        code => return Err(format!("Michiyo Cloud trả về HTTP {code}")),
+    }
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| "Phản hồi từ Michiyo Cloud không hợp lệ".to_string())?;
+    let token = body["token"].as_str().filter(|t| t.starts_with("md_")).ok_or("Phản hồi từ Michiyo Cloud không hợp lệ")?;
+    secrets::set("cloud", token)?;
+    let _ = app.emit("secrets-changed", ());
+    Ok(body["device_id"].as_str().unwrap_or_default().to_string())
+}
+#[tauri::command]
+pub async fn ai_models(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    target: String,
+) -> Result<Vec<String>, String> {
+    let c = config::read(&app)?;
+    let (base, key) = match target.as_str() {
+        "local" => (config::string(&c, "localBase", "http://127.0.0.1:11434/v1"), None),
+        "external" => (
+            config::string(&c, "openaiBase", "https://api.openai.com/v1"),
+            secrets::get("openai").ok(),
+        ),
+        _ => return Err("Nguồn model không hợp lệ".into()),
+    };
+    crate::ai::list_models(&state.client, &base, key.as_deref()).await
 }
 #[tauri::command]
 pub async fn test_connection(
@@ -206,6 +395,89 @@ pub async fn test_connection(
     }
     Ok("Kết nối thành công".into())
 }
+#[tauri::command]
+pub fn open_chat_in_main(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    draft: Value,
+) -> Result<(), String> {
+    if draft.to_string().len() > 1_100_000 {
+        return Err("Hội thoại quá dài".into());
+    }
+    *state
+        .pending_shell_chat_draft
+        .lock()
+        .map_err(|_| "Không mở được cuộc trò chuyện")? = Some(draft);
+    open_main(app, "chat".into())
+}
+
+#[tauri::command]
+pub fn take_shell_chat_draft(state: tauri::State<'_, Runtime>) -> Option<Value> {
+    state.pending_shell_chat_draft.lock().ok()?.take()
+}
+
+#[tauri::command]
+pub fn open_translation_in_main(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    text: String,
+    result: Value,
+) -> Result<(), String> {
+    if text.len() > 100_000 || result.to_string().len() > 200_000 {
+        return Err("Bản dịch quá dài".into());
+    }
+    *state
+        .pending_translation_draft
+        .lock()
+        .map_err(|_| "Không mở được bản dịch")? = Some(json!({"text": text, "result": result}));
+    open_main(app, "translate".into())
+}
+
+#[tauri::command]
+pub fn take_translation_draft(state: tauri::State<'_, Runtime>) -> Option<Value> {
+    state.pending_translation_draft.lock().ok()?.take()
+}
+
+#[tauri::command]
+pub fn open_main(app: tauri::AppHandle, route: String) -> Result<(), String> {
+    if ![
+        "home",
+        "chat",
+        "translate",
+        "notes",
+        "habits",
+        "calendar",
+        "history",
+        "bot",
+        "settings",
+    ]
+    .contains(&route.as_str())
+    {
+        return Err("Trang không hợp lệ".into());
+    }
+    let window = if let Some(window) = app.get_webview_window("main") {
+        window
+            .emit("shell-navigate", &route)
+            .map_err(|e| e.to_string())?;
+        window
+    } else {
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::App(format!("index.html?view=main#/{route}").into()),
+        )
+        .title("Michiyo")
+        .inner_size(1040., 720.)
+        .min_inner_size(640., 480.)
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?
+    };
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(), String> {
     let window = if let Some(w) = app.get_webview_window(label) {
         w
@@ -214,7 +486,7 @@ pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(
             "chat" => ("Michiyo · Chat", 320., 44.),
             "translate" => ("Michiyo · Dịch", 420., 400.),
             "settings" => ("Michiyo · Cài đặt", 720., 540.),
-            "menu" => ("Michiyo · Menu", 156., 160.),
+            "menu" => ("Michiyo · Menu", 156., 190.),
             _ => return Err("Cửa sổ không hợp lệ".into()),
         };
         tauri::WebviewWindowBuilder::new(
@@ -275,7 +547,8 @@ pub async fn menu_action(app: tauri::AppHandle, action: String) -> Result<(), St
         let _ = menu.hide();
     }
     match action.as_str() {
-        "chat" | "translate" | "settings" => show_panel(&app, &action, false),
+        "main" => open_main(app, "home".into()),
+        "chat" | "translate" | "settings" => open_main(app, action),
         "hide" => {
             if let Some(w) = app.get_webview_window("mascot") {
                 w.hide().map_err(|e| e.to_string())?;
@@ -525,6 +798,9 @@ fn register_shortcuts(
                             capture_selection(h).await;
                         });
                     }
+                    "main" => {
+                        let _ = open_main(handle.clone(), "home".into());
+                    }
                     "chat" => {
                         let h = handle.clone();
                         tauri::async_runtime::spawn(async move {
@@ -559,6 +835,10 @@ pub async fn apply_config(app: tauri::AppHandle) -> Result<(), String> {
         ),
         (config::string(&c, "chatShortcut", "Ctrl+Alt+C"), "chat"),
         (config::string(&c, "toggleShortcut", "Ctrl+Alt+M"), "toggle"),
+        (
+            config::string(&c, "shellShortcut", "Ctrl+Alt+Space"),
+            "main",
+        ),
     ];
     let parsed = shortcuts
         .iter()
@@ -569,7 +849,7 @@ pub async fn apply_config(app: tauri::AppHandle) -> Result<(), String> {
         .map(|s| s.id())
         .collect::<std::collections::HashSet<_>>()
         .len()
-        != 3
+        != shortcuts.len()
     {
         return Err("Các phím tắt không được trùng nhau".into());
     }
@@ -604,7 +884,9 @@ pub async fn apply_config(app: tauri::AppHandle) -> Result<(), String> {
 // Saved physical coordinates may belong to a monitor that is no longer attached.
 // Validate after applying scale so the complete mascot remains reachable.
 pub fn ensure_mascot_on_screen(app: &tauri::AppHandle) -> Result<(), String> {
-    let Some(window) = app.get_webview_window("mascot") else { return Ok(()); };
+    let Some(window) = app.get_webview_window("mascot") else {
+        return Ok(());
+    };
     let position = window.outer_position().map_err(|e| e.to_string())?;
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let monitors = window.available_monitors().map_err(|e| e.to_string())?;
@@ -612,8 +894,10 @@ pub fn ensure_mascot_on_screen(app: &tauri::AppHandle) -> Result<(), String> {
         let area = monitor.work_area();
         position.x as i64 >= area.position.x as i64
             && position.y as i64 >= area.position.y as i64
-            && position.x as i64 + size.width as i64 <= area.position.x as i64 + area.size.width as i64
-            && position.y as i64 + size.height as i64 <= area.position.y as i64 + area.size.height as i64
+            && position.x as i64 + size.width as i64
+                <= area.position.x as i64 + area.size.width as i64
+            && position.y as i64 + size.height as i64
+                <= area.position.y as i64 + area.size.height as i64
     });
     if !visible && !monitors.is_empty() {
         reset_position(app.clone())?;
@@ -684,4 +968,391 @@ pub fn reset_position(app: tauri::AppHandle) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+pub(crate) fn local_db(app: &tauri::AppHandle) -> Result<rusqlite::Connection, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Không tìm thấy thư mục dữ liệu")?;
+    std::fs::create_dir_all(&dir).map_err(|_| "Không tạo được thư mục dữ liệu")?;
+    crate::db::open(&dir.join("michiyo.db")).map_err(|_| "Không mở được cơ sở dữ liệu".to_string())
+}
+
+fn history_db(app: &tauri::AppHandle) -> Result<rusqlite::Connection, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Không tìm thấy thư mục dữ liệu")?;
+    std::fs::create_dir_all(&dir).map_err(|_| "Không tạo được thư mục dữ liệu")?;
+    let mut db = crate::db::open(&dir.join("michiyo.db"))
+        .map_err(|_| "Không mở được cơ sở dữ liệu lịch sử")?;
+    crate::db::import_history(&mut db, &dir.join("history.json")).map_err(|_| {
+        "Không nhập được lịch sử cũ. Dữ liệu gốc vẫn được giữ; hãy kiểm tra history.json."
+    })?;
+    Ok(db)
+}
+
+#[tauri::command]
+pub fn history_list(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+) -> Result<Vec<crate::db::Conversation>, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không mở được lịch sử")?;
+    let db = history_db(&app)?;
+    crate::db::list_history(&db).map_err(|_| "Không đọc được lịch sử".to_string())
+}
+
+#[tauri::command]
+pub fn history_save(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    conversation: crate::db::Conversation,
+    limit: usize,
+) -> Result<Vec<crate::db::Conversation>, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không lưu được lịch sử")?;
+    let mut db = history_db(&app)?;
+    let result = crate::db::save_history(&mut db, &conversation, limit)
+        .map_err(|_| "Không lưu được lịch sử".to_string())?;
+    let _ = app.emit("history-changed", ());
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn history_delete(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    id: String,
+) -> Result<Vec<crate::db::Conversation>, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không xóa được lịch sử")?;
+    let mut db = history_db(&app)?;
+    let result = crate::db::delete_history(&mut db, &id)
+        .map_err(|_| "Không xóa được lịch sử".to_string())?;
+    let _ = app.emit("history-changed", ());
+    Ok(result)
+}
+
+fn note_error(error: Box<dyn std::error::Error + Send + Sync>) -> String {
+    let message = error.to_string();
+    match message.as_str() {
+        "Ghi chú không hợp lệ"
+        | "Mã ghi chú không hợp lệ"
+        | "Ghi chú đã thay đổi; hãy tải lại"
+        | "Không tìm thấy ghi chú" => message,
+        _ => "Không lưu được ghi chú. Hãy thử lại.".into(),
+    }
+}
+#[tauri::command]
+pub fn notes_list(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    query: String,
+) -> Result<Vec<crate::db::notes::Note>, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không đọc được ghi chú")?;
+    let db = local_db(&app)?;
+    crate::db::notes::list(&db, &query).map_err(|_| "Không tìm được ghi chú".to_string())
+}
+#[tauri::command]
+pub fn notes_save(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    input: crate::db::notes::NoteInput,
+) -> Result<crate::db::notes::Note, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không lưu được ghi chú")?;
+    let mut db = local_db(&app)?;
+    let note = crate::db::notes::save(&mut db, input).map_err(note_error)?;
+    let _ = app.emit("notes-changed", ());
+    Ok(note)
+}
+#[tauri::command]
+pub fn notes_delete(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    id: String,
+    rev: i64,
+) -> Result<(), String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không xóa được ghi chú")?;
+    let mut db = local_db(&app)?;
+    crate::db::notes::delete(&mut db, &id, rev).map_err(note_error)?;
+    let _ = app.emit("notes-changed", ());
+    Ok(())
+}
+
+fn habit_error(error: Box<dyn std::error::Error + Send + Sync>) -> String {
+    let message = error.to_string();
+    match message.as_str() {
+        "Thói quen không hợp lệ"
+        | "Mã thói quen không hợp lệ"
+        | "Thói quen đã thay đổi; hãy tải lại"
+        | "Không tìm thấy thói quen"
+        | "Ngày không hợp lệ" => message,
+        _ => "Không lưu được thói quen. Hãy thử lại.".into(),
+    }
+}
+#[tauri::command]
+pub fn habits_list(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    today: String,
+) -> Result<Vec<crate::db::habits::HabitView>, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không đọc được thói quen")?;
+    let db = local_db(&app)?;
+    crate::db::habits::list(&db, &today).map_err(habit_error)
+}
+#[tauri::command]
+pub fn habits_save(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    input: crate::db::habits::HabitInput,
+) -> Result<crate::db::habits::Habit, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không lưu được thói quen")?;
+    let mut db = local_db(&app)?;
+    let habit = crate::db::habits::save(&mut db, input).map_err(habit_error)?;
+    let _ = app.emit("habits-changed", ());
+    Ok(habit)
+}
+#[tauri::command]
+pub fn habits_delete(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    id: String,
+    rev: i64,
+) -> Result<(), String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không xóa được thói quen")?;
+    let mut db = local_db(&app)?;
+    crate::db::habits::delete(&mut db, &id, rev).map_err(habit_error)?;
+    let _ = app.emit("habits-changed", ());
+    Ok(())
+}
+#[tauri::command]
+pub fn habits_check_in(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    id: String,
+    date: String,
+    done: bool,
+) -> Result<(), String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không lưu được thói quen")?;
+    let mut db = local_db(&app)?;
+    crate::db::habits::check_in(&mut db, &id, &date, done).map_err(habit_error)?;
+    let _ = app.emit("habits-changed", ());
+    Ok(())
+}
+
+fn event_error(error: Box<dyn std::error::Error + Send + Sync>) -> String {
+    let message = error.to_string();
+    match message.as_str() {
+        "Sự kiện không hợp lệ"
+        | "Mã sự kiện không hợp lệ"
+        | "Sự kiện đã thay đổi; hãy tải lại"
+        | "Không tìm thấy sự kiện"
+        | "Khoảng thời gian không hợp lệ" => message,
+        _ => "Không lưu được sự kiện. Hãy thử lại.".into(),
+    }
+}
+#[tauri::command]
+pub fn events_range(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    from: i64,
+    until: i64,
+    tz_offset: i64,
+) -> Result<Vec<crate::db::events::Occurrence>, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không đọc được lịch")?;
+    let db = local_db(&app)?;
+    crate::db::events::range(&db, from, until, tz_offset).map_err(event_error)
+}
+#[tauri::command]
+pub fn events_save(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    input: crate::db::events::EventInput,
+) -> Result<crate::db::events::Event, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không lưu được sự kiện")?;
+    let mut db = local_db(&app)?;
+    let event = crate::db::events::save(&mut db, input).map_err(event_error)?;
+    let _ = app.emit("events-changed", ());
+    Ok(event)
+}
+#[tauri::command]
+pub fn events_delete(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    id: String,
+    rev: i64,
+) -> Result<(), String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không xóa được sự kiện")?;
+    let mut db = local_db(&app)?;
+    crate::db::events::delete(&mut db, &id, rev).map_err(event_error)?;
+    let _ = app.emit("events-changed", ());
+    Ok(())
+}
+#[tauri::command]
+pub fn events_set_done(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    id: String,
+    rev: i64,
+    done: bool,
+) -> Result<crate::db::events::Event, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không lưu được sự kiện")?;
+    let mut db = local_db(&app)?;
+    let event = crate::db::events::set_done(&mut db, &id, rev, done).map_err(event_error)?;
+    let _ = app.emit("events-changed", ());
+    Ok(event)
+}
+
+fn reminder_error(error: Box<dyn std::error::Error + Send + Sync>) -> String {
+    let message = error.to_string();
+    match message.as_str() {
+        "Không tìm thấy nhắc nhở"
+        | "Nhắc nhở không còn chờ xử lý"
+        | "Thời gian hoãn không hợp lệ" => message,
+        _ => "Không cập nhật được nhắc nhở. Hãy thử lại.".into(),
+    }
+}
+/// Remembers the UI's UTC offset so the background scheduler can evaluate recurrences locally.
+#[tauri::command]
+pub fn set_timezone(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    offset: i64,
+) -> Result<(), String> {
+    if offset.abs() > 14 * 60 {
+        return Err("Múi giờ không hợp lệ".into());
+    }
+    let _guard = state.history_lock.lock().map_err(|_| "Không lưu được múi giờ")?;
+    let db = local_db(&app)?;
+    db.execute(
+        "INSERT INTO sync_state (key, value) VALUES ('tz_offset', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [offset.to_string()],
+    )
+    .map_err(|_| "Không lưu được múi giờ".to_string())?;
+    Ok(())
+}
+#[tauri::command]
+pub fn reminders_pending(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+) -> Result<Vec<crate::db::reminders::Pending>, String> {
+    let _guard = state.history_lock.lock().map_err(|_| "Không đọc được nhắc nhở")?;
+    let db = local_db(&app)?;
+    crate::db::reminders::pending(&db).map_err(reminder_error)
+}
+#[tauri::command]
+pub fn reminders_dismiss(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    id: String,
+) -> Result<(), String> {
+    let _guard = state.history_lock.lock().map_err(|_| "Không cập nhật được nhắc nhở")?;
+    let mut db = local_db(&app)?;
+    crate::db::reminders::dismiss(&mut db, &id).map_err(reminder_error)?;
+    let _ = app.emit("reminders-changed", ());
+    Ok(())
+}
+#[tauri::command]
+pub fn reminders_snooze(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    id: String,
+    minutes: i64,
+) -> Result<(), String> {
+    let _guard = state.history_lock.lock().map_err(|_| "Không cập nhật được nhắc nhở")?;
+    let mut db = local_db(&app)?;
+    crate::db::reminders::snooze(&mut db, &id, minutes).map_err(reminder_error)?;
+    let _ = app.emit("reminders-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn activity_list(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    kind: Option<String>,
+    from: Option<i64>,
+    until: Option<i64>,
+) -> Result<Vec<crate::db::activity::Activity>, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không đọc được lịch sử hoạt động")?;
+    let db = local_db(&app)?;
+    crate::db::activity::list(&db, kind.as_deref(), from, until)
+        .map_err(|_| "Không đọc được lịch sử hoạt động".into())
+}
+#[tauri::command]
+pub fn activity_delete(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không xóa được lịch sử hoạt động")?;
+    let mut db = local_db(&app)?;
+    crate::db::activity::delete(&mut db, &ids).map_err(|_| "Không xóa được lịch sử hoạt động")?;
+    let _ = app.emit("activity-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn activity_delete_range(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    from: i64,
+    until: i64,
+) -> Result<usize, String> {
+    let _guard = state
+        .history_lock
+        .lock()
+        .map_err(|_| "Không xóa được lịch sử hoạt động")?;
+    let mut db = local_db(&app)?;
+    let count = crate::db::activity::delete_range(&mut db, from, until)
+        .map_err(|_| "Không xóa được lịch sử hoạt động".to_string())?;
+    let _ = app.emit("activity-changed", ());
+    Ok(count)
 }

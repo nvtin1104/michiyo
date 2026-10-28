@@ -4,6 +4,7 @@
   import { listen } from '@tauri-apps/api/event';
 
   import { call, desktop } from '../lib/api';
+  export let compact = false;
   let text = '';
   let result: {
     text: string;
@@ -33,6 +34,22 @@
   onMount(() => {
     let off: undefined | (() => void);
     let offError: undefined | (() => void);
+    let offNavigate: undefined | (() => void);
+    const takeDraft = async () => {
+      if (compact) return;
+      try {
+        const draft = await call<{
+          text: string;
+          result: typeof result;
+        } | null>('take_translation_draft');
+        if (draft) {
+          text = draft.text;
+          result = draft.result;
+        }
+      } catch (e) {
+        error = String(e);
+      }
+    };
     const take = async () => {
       const pending = await call<{ text?: string; error?: string } | null>(
         'take_selection',
@@ -45,17 +62,26 @@
       }
     };
     if (desktop) {
-      listen('selection', take).then((f) => {
-        off = f;
-        take();
-      });
-      listen<string>('selection-error', (e) => (error = e.payload)).then(
-        (f) => (offError = f),
-      );
+      if (!compact) {
+        listen<string>('shell-navigate', (event) => {
+          if (event.payload === 'translate') takeDraft();
+        }).then((f) => (offNavigate = f));
+        takeDraft();
+      }
+      if (compact) {
+        listen('selection', take).then((f) => {
+          off = f;
+          take();
+        });
+        listen<string>('selection-error', (e) => (error = e.payload)).then(
+          (f) => (offError = f),
+        );
+      }
     }
     return () => {
       off?.();
       offError?.();
+      offNavigate?.();
     };
   });
 </script>
@@ -65,6 +91,13 @@
     <small>WORDS, WITH CONTEXT</small>
     <h1>{t('Dịch ngữ cảnh', $locale)} <span>↔</span></h1>
   </div>
+  {#if compact}<button
+      disabled={busy}
+      onclick={() =>
+        call('open_translation_in_main', { text, result }).catch(
+          (e) => (error = String(e)),
+        )}>Mở trong app ↗</button
+    >{/if}
 </header>
 <p class="muted">
   {t('Chọn văn bản ở ứng dụng bất kỳ, nhấn Ctrl + Alt + T.', $locale)}

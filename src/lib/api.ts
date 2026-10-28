@@ -33,6 +33,7 @@ export const defaults = {
   libreUrl: 'https://libretranslate.com',
   translateShortcut: 'Ctrl+Alt+T',
   chatShortcut: 'Ctrl+Alt+C',
+  shellShortcut: 'Ctrl+Alt+Space',
   toggleShortcut: 'Ctrl+Alt+M',
   skin: 'default',
   animationSpeed: 1,
@@ -43,5 +44,15 @@ export const defaults = {
   soundEffects: true,
   sleepMinutes: 5,
   live2d: false,
+  mode: 'online' as 'offline' | 'online' | 'hybrid',
+  modelSource: 'external' as 'external' | 'cloudflare',
+  chatProvider: 'claude' as 'claude' | 'openai_compat',
+  openaiBase: 'https://api.openai.com/v1',
+  openaiModel: '',
+  localBase: 'http://127.0.0.1:11434/v1',
+  localModel: '',
+  cloudUrl: '',
+  cloudModel: '',
+  syncScopes: { notes: true, habits: true, calendar: true, activity: true },
 };
 export type Config = typeof defaults;

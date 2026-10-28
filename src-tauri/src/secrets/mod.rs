@@ -5,7 +5,7 @@ pub fn get(name: &str) -> Result<String, String> {
         .map_err(|error|match error{keyring::Error::NoEntry=>format!("Chưa có API key cho {name}. Hãy mở Cài đặt."),_=>"Không đọc được kho bảo mật hệ thống. Hãy kiểm tra quyền truy cập keychain và thử lại.".into()})
 }
 pub fn set(name: &str, value: &str) -> Result<(), String> {
-    if !["claude", "google", "libre"].contains(&name) {
+    if !["claude", "google", "libre", "openai", "cloud"].contains(&name) {
         return Err("Tên dịch vụ không hợp lệ".into());
     }
     let entry = keyring::Entry::new("app.michiyo.desktop", name).map_err(|e| e.to_string())?;

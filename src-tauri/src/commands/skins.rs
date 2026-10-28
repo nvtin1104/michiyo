@@ -22,7 +22,9 @@ pub fn list_skins(app: tauri::AppHandle) -> Result<Value, String> {
             && entry.path().join("spritesheet.png").is_file()
         {
             if let Some(name) = entry.file_name().to_str() {
-                if !names.iter().any(|n| n == name) { names.push(name.to_string()); }
+                if !names.iter().any(|n| n == name) {
+                    names.push(name.to_string());
+                }
             }
         }
     }

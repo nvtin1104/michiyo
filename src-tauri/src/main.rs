@@ -1,8 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod ai;
 mod commands;
 mod config;
+mod db;
 mod providers;
+mod reminders;
 mod secrets;
+mod sync;
 use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 fn main() {
@@ -18,15 +22,48 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(commands::Runtime::default())
         .invoke_handler(tauri::generate_handler![
+            commands::activity_list,
+            commands::activity_delete,
+            commands::activity_delete_range,
+            commands::notes_list,
+            commands::notes_save,
+            commands::notes_delete,
+            commands::habits_list,
+            commands::habits_save,
+            commands::habits_delete,
+            commands::habits_check_in,
+            commands::events_range,
+            commands::events_save,
+            commands::events_delete,
+            commands::events_set_done,
+            commands::set_timezone,
+            commands::reminders_pending,
+            commands::reminders_dismiss,
+            commands::reminders_snooze,
+            commands::history_list,
+            commands::history_save,
+            commands::history_delete,
             commands::save_secret,
             commands::secret_status,
             commands::translate,
             commands::chat,
             commands::stop_chat,
             commands::test_connection,
+            commands::ai_models,
+            commands::cloud_pair,
+            sync::sync_status,
+            sync::sync_now,
+            commands::ai_summarize,
+            commands::ai_suggest_actions,
             commands::open_panel,
+            commands::open_main,
+            commands::open_translation_in_main,
+            commands::open_chat_in_main,
+            commands::take_shell_chat_draft,
+            commands::take_translation_draft,
             commands::apply_config,
             commands::set_hit_mask,
             commands::skins::list_skins,
@@ -46,9 +83,10 @@ fn main() {
                 tray::TrayIconBuilder,
             };
             let show = MenuItem::with_id(app, "show", "Hiện / Ẩn", true, None::<&str>)?;
+            let main = MenuItem::with_id(app, "main", "Mở Michiyo", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "settings", "Cài đặt", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Thoát", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
+            let menu = Menu::with_items(app, &[&main, &show, &settings, &quit])?;
             TrayIconBuilder::new()
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
                     "../icons/icon.png"
@@ -66,10 +104,13 @@ fn main() {
                             }
                         }
                     }
+                    "main" => {
+                        let _ = commands::open_main(app.clone(), "home".into());
+                    }
                     "settings" => {
                         let h = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = commands::show_panel(&h, "settings", false);
+                            let _ = commands::open_main(h, "settings".into());
                         });
                     }
                     "quit" => app.exit(0),
@@ -90,6 +131,8 @@ fn main() {
                     p.y + s.height as i32 - 230,
                 ));
             }
+            reminders::start(app.handle().clone());
+            sync::start(app.handle().clone());
             let h = app.handle().clone();
             let setup_handle = h.clone();
             tauri::async_runtime::spawn(async move {

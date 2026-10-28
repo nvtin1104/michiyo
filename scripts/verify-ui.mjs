@@ -61,6 +61,24 @@ await page.getByRole('textbox', { name: 'Văn bản cần dịch' }).fill('Hello
 await page.getByRole('button', { name: 'Dịch ↗', exact: true }).click();
 await page.getByRole('alert').waitFor();
 assert.match(await page.getByRole('alert').textContent(), /desktop/);
+await page.goto('http://127.0.0.1:1420/?view=main#/home');
+await page.getByRole('heading', { name: /Một ngày cùng Michiyo/ }).waitFor();
+await page
+  .getByRole('navigation', { name: 'Điều hướng chính' })
+  .getByRole('button', { name: 'Trò chuyện' })
+  .click();
+await page.getByRole('textbox', { name: 'Tin nhắn' }).waitFor();
+assert.equal(await page.evaluate(() => location.hash), '#/chat');
+await page
+  .getByRole('navigation', { name: 'Điều hướng chính' })
+  .getByRole('button', { name: 'Dịch', exact: true })
+  .click();
+await page.getByRole('textbox', { name: 'Văn bản cần dịch' }).waitFor();
+await page
+  .getByRole('navigation', { name: 'Điều hướng chính' })
+  .getByRole('button', { name: 'Cài đặt' })
+  .click();
+await page.getByRole('heading', { name: 'Cài đặt', exact: true }).waitFor();
 await page.goto('http://127.0.0.1:1420/?view=mascot');
 await page.locator('canvas').waitFor();
 await page.waitForTimeout(600);

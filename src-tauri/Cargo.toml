@@ -11,6 +11,7 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -23,6 +24,8 @@ enigo = "0.2"
 whatlang = "0.16"
 base64 = "0.22"
 isolang = "2"
+rusqlite = { version = "0.41.0", features = ["bundled"] }
+ulid = "3.0.0"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
 [dev-dependencies]

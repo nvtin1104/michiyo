@@ -32,6 +32,35 @@ try {
       },
       async invoke(command, args = {}) {
         if (command !== 'set_hit_mask') window.calls.push({ command, args });
+        if (command === 'take_shell_chat_draft') {
+          if (window.location.search.includes('chat-draft'))
+            return {
+              current: 'test-id',
+              messages: [{ role: 'assistant', content: 'Tin nhắn trước' }],
+              input: 'Văn bản đang soạn',
+            };
+          return null;
+        }
+        if (command === 'take_translation_draft') {
+          if (window.location.search.includes('translation-draft'))
+            return {
+              text: 'Hello',
+              result: {
+                text: 'Xin chào',
+                engine: 'test',
+                source: 'en',
+                target: 'vi',
+              },
+            };
+          return null;
+        }
+        if (command === 'history_list') {
+          if (window.location.search.includes('fail-history'))
+            throw 'Không đọc được lịch sử';
+          return window.historyMock || [];
+        }
+        if (command === 'history_save') return [args.conversation];
+        if (command === 'history_delete') return [];
         if (command === 'plugin:store|load') return 1;
         if (command === 'plugin:store|get') return [null, false];
         if (command === 'secret_status')
@@ -117,6 +146,16 @@ try {
   await input.waitFor();
   await page.waitForFunction(
     () => document.activeElement?.tagName === 'TEXTAREA',
+  );
+  await input.fill('Bản nháp');
+  await page.getByRole('button', { name: 'Mở trong app' }).click();
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.calls.find((c) => c.command === 'open_chat_in_main')?.args.draft
+          .input,
+    ),
+    'Bản nháp',
   );
   await input.fill('Xin chào');
   await input.press('Enter');
@@ -212,7 +251,7 @@ try {
   );
   await page.evaluate(() => (window.streamChunks = null));
   const savedBefore = await page.evaluate(
-    () => window.calls.filter((c) => c.command === 'plugin:store|set').length,
+    () => window.calls.filter((c) => c.command === 'history_save').length,
   );
   await page.evaluate(
     () => (window.chatError = 'Chưa có API key cho claude. Hãy mở Cài đặt.'),
@@ -232,7 +271,7 @@ try {
   );
   assert.equal(
     await page.evaluate(
-      () => window.calls.filter((c) => c.command === 'plugin:store|set').length,
+      () => window.calls.filter((c) => c.command === 'history_save').length,
     ),
     savedBefore,
   );
@@ -246,14 +285,15 @@ try {
     window.emitMockEvent('secrets-changed');
   });
   await page.locator('.chat-notice').waitFor({ state: 'detached' });
-  await page.setViewportSize({ width: 156, height: 160 });
+  await page.setViewportSize({ width: 156, height: 190 });
   await page.goto('http://127.0.0.1:1420/?view=menu');
   const menu = page.getByRole('menu');
   await menu.waitFor();
-  assert.equal(await page.getByRole('menuitem').count(), 5);
+  assert.equal(await page.getByRole('menuitem').count(), 6);
   await page.waitForFunction(
     () => document.activeElement?.getAttribute('role') === 'menuitem',
   );
+  await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   assert.equal(
@@ -281,6 +321,63 @@ try {
     await page.evaluate(() =>
       window.calls.some((c) => c.command === 'plugin:window|hide'),
     ),
+  );
+  await page.setViewportSize({ width: 1000, height: 720 });
+  await page.goto('http://127.0.0.1:1420/?view=main#/chat');
+  const shellInput = page.getByRole('textbox', { name: 'Tin nhắn' });
+  await shellInput.waitFor();
+  await page.evaluate(
+    () => (window.streamChunks = ['Một ', 'câu trả lời hoàn chỉnh']),
+  );
+  await shellInput.fill('Kiểm tra chuyển trang');
+  await shellInput.press('Enter');
+  await page.getByText('Một ', { exact: true }).waitFor();
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Dịch', exact: true })
+    .click();
+  await page.evaluate(() => window.finishMockStream());
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Trò chuyện' })
+    .click();
+  await page.getByText('Một câu trả lời hoàn chỉnh', { exact: true }).waitFor();
+  await page.goto('http://127.0.0.1:1420/?view=main#/chat');
+  await page.getByRole('textbox', { name: 'Tin nhắn' }).waitFor();
+  await page.evaluate(() => {
+    window.historyMock = [{ id: 'other', title: 'Cửa sổ khác', messages: [] }];
+    window.emitMockEvent('history-changed');
+  });
+  await page
+    .locator('select option')
+    .filter({ hasText: 'Cửa sổ khác' })
+    .waitFor({ state: 'attached' });
+  await page.goto('http://127.0.0.1:1420/?view=main&chat-draft=1#/chat');
+  await page.getByText('Tin nhắn trước', { exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole('textbox', { name: 'Tin nhắn' }).inputValue(),
+    'Văn bản đang soạn',
+  );
+  await page.goto(
+    'http://127.0.0.1:1420/?view=main&translation-draft=1#/translate',
+  );
+  const translated = page.getByRole('textbox', { name: 'Văn bản cần dịch' });
+  await translated.waitFor();
+  await page.getByText('Xin chào', { exact: true }).waitFor();
+  assert.equal(await translated.inputValue(), 'Hello');
+  await page.setViewportSize({ width: 360, height: 340 });
+  await page.goto('http://127.0.0.1:1420/?view=chat&fail-history=1');
+  await page.getByText('Không đọc được lịch sử', { exact: true }).waitFor();
+  const blockedInput = page.getByRole('textbox', { name: 'Tin nhắn' });
+  await blockedInput.fill('Không gửi khi chưa đọc được lịch sử');
+  assert.equal(
+    await page.getByRole('button', { name: 'Gửi tin nhắn' }).isDisabled(),
+    true,
+  );
+  await blockedInput.press('Enter');
+  assert.equal(
+    await page.evaluate(() => window.calls.some((c) => c.command === 'chat')),
+    false,
   );
   assert.deepEqual(errors, []);
   console.log(

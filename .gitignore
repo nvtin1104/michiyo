@@ -6,3 +6,13 @@ src-tauri/gen/schemas/
 .env*
 artifacts/
 src-tauri/resources/claude-agent/
+
+shared/dist/
+*.db
+*.db-shm
+*.db-wal
+.dev.vars*
+
+# Cloudflare Worker local state and secrets
+cloud/.dev.vars
+cloud/.wrangler/

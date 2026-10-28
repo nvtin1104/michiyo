@@ -3,7 +3,7 @@
   import { onMount, tick } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen, emit } from '@tauri-apps/api/event';
-  import { load } from '@tauri-apps/plugin-store';
+  import { newId } from '@michiyo/shared/ids';
 
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -26,10 +26,30 @@
   let input = '';
   let busy = false;
   let error = '';
+  let noteStatus = '';
+  let historyReady = !desktop;
   $: needsKey = /Chưa có API key cho claude/i.test(error);
   let job = '';
   let scroll: HTMLDivElement;
   let placement = 'left';
+  async function takeShellDraft() {
+    if (compact || busy || !desktop) return;
+    try {
+      const draft = await call<{
+        current: string;
+        messages: Message[];
+        input: string;
+      } | null>('take_shell_chat_draft');
+      if (draft) {
+        current = draft.current;
+        messages = draft.messages;
+        input = draft.input;
+        focus();
+      }
+    } catch (e) {
+      error = String(e);
+    }
+  }
   function resizeComposer() {
     if (!composer || !compact) return;
     composer.style.height = '0px';
@@ -37,11 +57,10 @@
   }
   async function persist() {
     if (!desktop) return;
-    const store = await load('history.json');
     let c = conversations.find((c) => c.id === current);
     if (!c) {
       c = {
-        id: current || crypto.randomUUID(),
+        id: current || newId(),
         title: messages[0]?.content.slice(0, 35) || 'Cuộc trò chuyện mới',
         messages: [],
       };
@@ -49,9 +68,14 @@
       conversations.unshift(c);
     }
     c.messages = messages.map((m) => ({ ...m }));
-    conversations = conversations.slice(0, config.historyLimit);
-    await store.set('conversations', conversations);
-    await store.save();
+    try {
+      conversations = await call<Conversation[]>('history_save', {
+        conversation: c,
+        limit: config.historyLimit,
+      });
+    } catch (e) {
+      error = String(e);
+    }
   }
   onMount(() => {
     let off: undefined | (() => void);
@@ -59,6 +83,8 @@
     let offFocus: undefined | (() => void);
     let offPlacement: undefined | (() => void);
     let offSecrets: undefined | (() => void);
+    let offHistory: undefined | (() => void);
+    let offNavigate: undefined | (() => void);
     let observer: ResizeObserver | undefined;
     let resizeTimer: ReturnType<typeof setTimeout>;
     if (compact && desktop) {
@@ -92,8 +118,13 @@
           'chat-placement',
           (event) => (placement = event.payload),
         );
-      const store = await load('history.json');
-      conversations = (await store.get<Conversation[]>('conversations')) || [];
+      let historyLoaded = false;
+      try {
+        conversations = await call<Conversation[]>('history_list');
+        historyLoaded = true;
+      } catch (e) {
+        error = String(e);
+      }
       if (conversations[0]) {
         current = conversations[0].id;
         messages = conversations[0].messages;
@@ -113,9 +144,39 @@
         const prompt = await call<string | null>('take_chat_prompt');
         if (prompt) input = prompt;
       };
-      offFollow = await listen('ask-translation', take);
-      await take();
+      if (compact) {
+        offFollow = await listen('ask-translation', take);
+        await take();
+      }
+      offHistory = await listen('history-changed', async () => {
+        if (busy || !historyReady) return;
+        try {
+          const selectedId = current;
+          const latest = await call<Conversation[]>('history_list');
+          if (busy || current !== selectedId) return;
+          conversations = latest;
+          if (current) {
+            const selected = latest.find(
+              (conversation) => conversation.id === current,
+            );
+            if (selected) messages = selected.messages;
+            else {
+              current = '';
+              messages = [];
+            }
+          }
+        } catch (e) {
+          error = String(e);
+        }
+      });
+      if (!compact) {
+        offNavigate = await listen<string>('shell-navigate', (event) => {
+          if (event.payload === 'chat') takeShellDraft();
+        });
+        await takeShellDraft();
+      }
       offFocus = await listen('chat-focus', focus);
+      historyReady = historyLoaded;
       focus();
     })();
     return () => {
@@ -124,12 +185,14 @@
       offFocus?.();
       offPlacement?.();
       offSecrets?.();
+      offHistory?.();
+      offNavigate?.();
       observer?.disconnect();
       clearTimeout(resizeTimer);
     };
   });
   async function send() {
-    if (!input.trim() || busy) return;
+    if (!input.trim() || busy || !historyReady) return;
     error = '';
     const previous = messages;
     const submitted = input;
@@ -153,19 +216,44 @@
     } finally {
       if (messages !== previous && !messages.at(-1)?.content)
         messages = messages.slice(0, -1);
-      busy = false;
       if (messages !== previous) await persist();
+      busy = false;
+      if (!compact) await takeShellDraft();
+    }
+  }
+  async function saveAnswer(content: string) {
+    noteStatus = '';
+    try {
+      await call('notes_save', {
+        input: {
+          id: null,
+          rev: null,
+          title: content.trim().slice(0, 60) || 'Trả lời của Michiyo',
+          body: content,
+          tags: [],
+          pinned: false,
+        },
+      });
+      noteStatus = 'Đã lưu câu trả lời thành ghi chú.';
+    } catch (e) {
+      error = String(e);
     }
   }
   async function clear() {
-    messages = [];
-    conversations = conversations.filter((c) => c.id !== current);
-    current = '';
-    if (desktop) {
-      const store = await load('history.json');
-      await store.set('conversations', conversations);
-      await store.save();
+    if (desktop && current) {
+      try {
+        conversations = await call<Conversation[]>('history_delete', {
+          id: current,
+        });
+      } catch (e) {
+        error = String(e);
+        return;
+      }
+    } else {
+      conversations = conversations.filter((c) => c.id !== current);
     }
+    messages = [];
+    current = '';
   }
 </script>
 
@@ -176,7 +264,11 @@
     </div>
     <button
       class="icon"
-      onclick={() => call('open_panel', { label: 'settings' })}>⚙</button
+      onclick={() =>
+        call(
+          compact ? 'open_panel' : 'open_main',
+          compact ? { label: 'settings' } : { route: 'settings' },
+        )}>⚙</button
     >
   </header>
   <div class="toolbar">
@@ -237,6 +329,12 @@
             { FORBID_TAGS: ['a', 'img', 'video', 'audio', 'iframe'] },
           )}
         </div>
+        {#if message.content && !compact && message.role === 'assistant'}<button
+            type="button"
+            disabled={busy}
+            onclick={() => saveAnswer(message.content)}
+            >Lưu thành ghi chú</button
+          >{/if}
         {#if message.content && !compact}<button
             class="copy"
             onclick={() => call('copy_text', { text: message.content })}
@@ -250,6 +348,7 @@
         > Michiyo đang suy nghĩ…
       </p>{/if}
   </div>{/if}
+{#if noteStatus}<p role="status">{noteStatus}</p>{/if}
 {#if error}<div
     class="chat-notice"
     class:notice-error={!needsKey}
@@ -265,7 +364,11 @@
     <div class="notice-actions">
       <button
         type="button"
-        onclick={() => call('open_panel', { label: 'settings' })}
+        onclick={() =>
+          call(
+            compact ? 'open_panel' : 'open_main',
+            compact ? { label: 'settings' } : { route: 'settings' },
+          )}
         >{needsKey
           ? $locale === 'en'
             ? 'Add key'
@@ -314,9 +417,18 @@
       >{:else}<button
         class="primary"
         aria-label="Gửi tin nhắn"
-        disabled={!input.trim()}>{compact ? '↑' : 'Gửi ↗'}</button
+        disabled={!input.trim() || !historyReady}
+        >{compact ? '↑' : 'Gửi ↗'}</button
       >{/if}
     {#if compact}<button
+        type="button"
+        aria-label="Mở trong app"
+        disabled={busy}
+        onclick={() =>
+          call('open_chat_in_main', {
+            draft: { current, messages, input },
+          }).catch((e) => (error = String(e)))}>↗</button
+      ><button
         type="button"
         aria-label="Đóng trò chuyện"
         onclick={() => desktop && getCurrentWindow().hide()}>×</button

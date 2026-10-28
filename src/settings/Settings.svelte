@@ -28,7 +28,78 @@
   export let save: () => Promise<void>;
   let tab = 'Chung';
   let status = '';
-  let keys: Record<string, string> = { claude: '', google: '', libre: '' };
+  let keys: Record<string, string> = {
+    claude: '',
+    google: '',
+    libre: '',
+    openai: '',
+    cloudCode: '',
+  };
+  let models: Record<string, string[]> = { external: [], local: [] };
+  const presets: [string, string][] = [
+    ['OpenAI', 'https://api.openai.com/v1'],
+    ['OpenRouter', 'https://openrouter.ai/api/v1'],
+    ['Ollama', 'http://127.0.0.1:11434/v1'],
+    ['LM Studio', 'http://127.0.0.1:1234/v1'],
+  ];
+  type SyncStatus = {
+    enabled: boolean;
+    pending: number;
+    last_sync_at: number | null;
+    last_error: string | null;
+    syncing: boolean;
+  };
+  let sync: SyncStatus | null = null;
+  async function loadSync() {
+    if (!desktop) return;
+    try {
+      sync = await call<SyncStatus>('sync_status');
+    } catch {
+      sync = null;
+    }
+  }
+  async function syncNow() {
+    try {
+      await save();
+      sync = await call<SyncStatus>('sync_now');
+      status = 'Đã đồng bộ';
+    } catch (e) {
+      status = String(e);
+      await loadSync();
+    }
+  }
+  async function pairCloud() {
+    try {
+      await save();
+      await call('cloud_pair', {
+        url: config.cloudUrl,
+        code: keys.cloudCode,
+      });
+      keys.cloudCode = '';
+      stored = await call('secret_status');
+      status = 'Đã ghép nối với Michiyo Cloud';
+    } catch (e) {
+      status = String(e);
+    }
+  }
+  async function unpairCloud() {
+    try {
+      await call('save_secret', { name: 'cloud', value: '' });
+      stored = await call('secret_status');
+      status = 'Đã ngắt kết nối Michiyo Cloud';
+    } catch (e) {
+      status = String(e);
+    }
+  }
+  async function loadModels(target: 'external' | 'local') {
+    try {
+      await save();
+      models[target] = await call<string[]>('ai_models', { target });
+      status = `Tìm thấy ${models[target].length} model`;
+    } catch (e) {
+      status = String(e);
+    }
+  }
   let show = false;
   let stored: Record<string, boolean> = {};
   let dirtyTimer: ReturnType<typeof setTimeout>;
@@ -74,7 +145,7 @@
   </header>
   <div class="settings-layout">
     <nav aria-label="Nhóm cài đặt">
-      {#each ['Chung', 'API', 'Chat', 'Dịch', 'Phím tắt', 'Giao diện'] as name}<button
+      {#each ['Chung', 'API', 'AI', 'Đồng bộ', 'Chat', 'Dịch', 'Phím tắt', 'Giao diện'] as name}<button
           class:active={tab === name}
           onclick={() => (tab = name)}>{t(name, $locale)}</button
         >{/each}
@@ -191,6 +262,196 @@
         <p class="muted">
           {t('Khóa chỉ được lưu trong kho bảo mật của hệ điều hành.', $locale)}
         </p>
+      {:else if tab === 'AI'}<label
+          >Chế độ<Select
+            label="Chế độ"
+            bind:value={config.mode}
+            options={[
+              { value: 'online', label: 'Online' },
+              { value: 'hybrid', label: 'Hybrid (Online, dự phòng cục bộ)' },
+              { value: 'offline', label: 'Offline (chỉ model trên máy)' },
+            ]}
+            onchange={changed}
+          /></label
+        >
+        <p class="muted">
+          Offline không gửi chat hay bản dịch ra ngoài máy; Hybrid dùng model cục
+          bộ khi model chính lỗi.
+        </p>
+        <label
+          >Nguồn model<Select
+            label="Nguồn model"
+            bind:value={config.modelSource}
+            options={[
+              { value: 'external', label: 'Model ngoài' },
+              { value: 'cloudflare', label: 'Model Cloudflare' },
+            ]}
+            onchange={changed}
+          /></label
+        >
+        {#if config.modelSource === 'cloudflare'}
+          <label
+            >Địa chỉ Michiyo Cloud<input
+              aria-label="Địa chỉ Michiyo Cloud"
+              bind:value={config.cloudUrl}
+              placeholder="https://michiyo.example.workers.dev"
+            /></label
+          >
+          <label
+            >Model Cloudflare (để trống = mặc định)<input
+              aria-label="Model Cloudflare"
+              bind:value={config.cloudModel}
+              placeholder="@cf/meta/llama-3.1-8b-instruct"
+            /></label
+          >
+          <div class="key-card">
+            <h3>
+              Ghép nối thiết bị <small
+                >{stored.cloud ? '● Đã ghép nối' : '○ Chưa ghép nối'}</small
+              >
+            </h3>
+            {#if !stored.cloud}
+              <input
+                aria-label="Mã ghép nối"
+                bind:value={keys.cloudCode}
+                placeholder="Mã từ trang quản trị (hiệu lực 10 phút)"
+                autocomplete="off"
+              />
+            {/if}
+            <div class="actions">
+              {#if stored.cloud}<button onclick={unpairCloud}
+                  >Ngắt kết nối</button
+                >{:else}<button
+                  disabled={!keys.cloudCode.trim() || !config.cloudUrl.trim()}
+                  onclick={pairCloud}>Ghép nối</button
+                >{/if}
+            </div>
+          </div>
+        {:else}
+          <label
+            >Nhà cung cấp chat<Select
+              label="Nhà cung cấp chat"
+              bind:value={config.chatProvider}
+              options={[
+                { value: 'claude', label: 'Claude (Agent SDK)' },
+                { value: 'openai_compat', label: 'OpenAI-compatible' },
+              ]}
+              onchange={changed}
+            /></label
+          >
+          {#if config.chatProvider === 'openai_compat'}
+            <div class="actions" role="group" aria-label="Preset">
+              {#each presets as [name, url]}<button
+                  onclick={() => {
+                    config.openaiBase = url;
+                    changed();
+                  }}>{name}</button
+                >{/each}
+            </div>
+            <label
+              >Địa chỉ API<input
+                aria-label="Địa chỉ API"
+                bind:value={config.openaiBase}
+              /></label
+            >
+            <label
+              >Model<input
+                aria-label="Model ngoài"
+                list="models-external"
+                bind:value={config.openaiModel}
+              /><datalist id="models-external"
+                >{#each models.external as id}<option value={id}></option
+                  >{/each}</datalist
+              ></label
+            >
+            <div class="key-card">
+              <h3>
+                API key <small
+                  >{stored.openai ? '● Đã có key' : '○ Chưa có key'}</small
+                >
+              </h3>
+              <input
+                aria-label="openai API key"
+                type="password"
+                bind:value={keys.openai}
+                placeholder={t('Nhập key mới · để trống + Lưu để xóa', $locale)}
+                autocomplete="off"
+              />
+              <div class="actions">
+                <button onclick={() => saveKey('openai')}
+                  >{t('Lưu key', $locale)}</button
+                ><button onclick={() => loadModels('external')}
+                  >Liệt kê model</button
+                >
+              </div>
+            </div>
+          {/if}
+        {/if}
+        <h3>Model cục bộ</h3>
+        <label
+          >Địa chỉ cục bộ<input
+            aria-label="Địa chỉ cục bộ"
+            bind:value={config.localBase}
+          /></label
+        >
+        <label
+          >Model cục bộ<input
+            aria-label="Model cục bộ"
+            list="models-local"
+            bind:value={config.localModel}
+          /><datalist id="models-local"
+            >{#each models.local as id}<option value={id}></option>{/each}</datalist
+          ></label
+        >
+        <div class="actions">
+          <button onclick={() => loadModels('local')}
+            >Kiểm tra kết nối</button
+          >
+        </div>
+      {:else if tab === 'Đồng bộ'}
+        {#await loadSync()}{/await}
+        <p class="muted">
+          Đồng bộ ghi chú, thói quen, lịch và hoạt động giữa các thiết bị qua
+          Michiyo Cloud. Chế độ Offline tắt hoàn toàn đồng bộ. Lịch sử trò chuyện
+          không bao giờ được đồng bộ.
+        </p>
+        <div class="key-card">
+          <h3>
+            Trạng thái <small
+              >{sync?.enabled ? '● Đang bật' : '○ Đang tắt'}</small
+            >
+          </h3>
+          {#if sync?.enabled}
+            <p>Thay đổi chờ gửi: {sync.pending}</p>
+            <p>
+              Lần đồng bộ cuối: {sync.last_sync_at
+                ? new Date(sync.last_sync_at).toLocaleString()
+                : 'chưa có'}
+            </p>
+          {:else}
+            <p class="muted">
+              Cần chế độ Online/Hybrid, địa chỉ Michiyo Cloud và thiết bị đã ghép
+              nối (tab AI).
+            </p>
+          {/if}
+          {#if sync?.last_error}<p class="error" role="alert">
+              {sync.last_error}
+            </p>{/if}
+          <div class="actions">
+            <button disabled={!sync?.enabled || sync.syncing} onclick={syncNow}
+              >Đồng bộ ngay</button
+            >
+          </div>
+        </div>
+        <h3>Phạm vi</h3>
+        {#each [['notes', 'Ghi chú'], ['habits', 'Thói quen'], ['calendar', 'Lịch và nhắc nhở'], ['activity', 'Lịch sử hoạt động']] as [name, label]}<label
+            class="check"
+            ><input
+              type="checkbox"
+              aria-label={label}
+              bind:checked={config.syncScopes[name as keyof typeof config.syncScopes]}
+            />{label}</label
+          >{/each}
       {:else if tab === 'Chat'}<label
           >Model<Select
             label={t('Model', $locale)}
@@ -282,6 +543,7 @@
           >{t('Mở Chat', $locale)}<input
             bind:value={config.chatShortcut}
           /></label
+        ><label>Mở Michiyo<input bind:value={config.shellShortcut} /></label
         ><label
           >{t('Hiện / Ẩn mascot', $locale)}<input
             bind:value={config.toggleShortcut}

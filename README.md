@@ -26,7 +26,8 @@ Bản trình duyệt là preview giao diện, không giả lập kết quả AI;
 ## Sử dụng
 
 - Mascot luôn trên cùng, nền trong suốt, không xuất hiện trên taskbar. Kéo nhân vật để di chuyển và thả ở vị trí bất kỳ; vị trí được lưu nguyên, không tự hít vào cạnh màn hình. Các phép tính vị trí dùng tọa độ vật lý và work area, kích thước cửa sổ dùng đơn vị logic để hỗ trợ DPI. Menu chuột phải là cửa sổ custom nhỏ gọn, hỗ trợ phím mũi tên/Enter/Escape và tự ẩn khi mất focus.
-- Chuột trái vào mascot mở bong bóng nhỏ ngay cạnh nhân vật: nhập trực tiếp và xem câu trả lời streaming tại đó. Thiếu key sẽ báo trong bong bóng, không tự mở Cài đặt. Chuột phải mở menu Trò chuyện, Dịch văn bản, Cài đặt, Ẩn mascot và Thoát. Kéo bằng chuột trái để di chuyển. Tray có Hiện/Ẩn, Cài đặt, Thoát. Đóng bong bóng sẽ ẩn cửa sổ, giữ tác vụ/hội thoại.
+- Chuột trái vào mascot mở bong bóng nhỏ ngay cạnh nhân vật: nhập trực tiếp và xem câu trả lời streaming tại đó. Thiếu key sẽ báo trong bong bóng, không tự mở Cài đặt. Chuột phải mở menu Trò chuyện, Dịch văn bản, Cài đặt, Ẩn mascot và Thoát. Kéo bằng chuột trái để di chuyển. Tray có Mở Michiyo, Hiện/Ẩn, Cài đặt, Thoát. Đóng bong bóng sẽ ẩn cửa sổ, giữ tác vụ/hội thoại.
+- **Ctrl+Alt+Space** mở cửa sổ Michiyo; sidebar tập hợp Chat, Dịch và Cài đặt. Ghi chú hỗ trợ Markdown, thẻ, ghim và tìm kiếm cục bộ; lịch sử hoạt động ghi nhận chat, dịch và ghi chú; thói quen, lịch và bot đang được phát triển.
 - **Ctrl+Alt+T**: bôi đen văn bản ở app khác rồi nhấn để dịch. Popup tự mở cạnh con trỏ, đổi phía và giới hạn trong màn hình. **Ctrl+Alt+C** mở Chat; **Ctrl+Alt+M** hiện/ẩn mascot. Đổi phím ở Cài đặt → Phím tắt.
 - Cài đặt → API: nhập khóa, **Lưu key**, sau đó Kiểm tra kết nối. Ô trống + Lưu key xóa khóa đã lưu. Khóa đã lưu không được đọc ngược lên UI; chỉ trả cờ có/chưa có khóa. Giá trị vừa nhập chỉ tồn tại tạm trong ô nhập và được xóa sau khi lưu.
 - Chat hỗ trợ markdown được sanitize, code block, sao chép câu trả lời, dừng stream, hội thoại mới và xóa hội thoại hiện tại. Enter gửi, Shift+Enter xuống dòng. Model mặc định `claude-haiku-5-5`, có thể chọn `claude-sonnet-5-5`; quyền dùng model phụ thuộc tài khoản Claude.
@@ -51,11 +52,17 @@ Kiểm tra giao diện trên Chrome đã cài (mở `npm run dev` ở terminal k
 
 ```powershell
 npm run test:ui
+npm run test:notes
+npm run test:activity
 ```
 
 Script kiểm tra nhập Chat, các tab/API key ẩn, phím tắt, lỗi khi gọi native từ preview và canvas Pixi. Ảnh QA nằm trong `artifacts/` (không commit).
 
 **Trạng thái kiểm chứng trên máy triển khai:** build frontend, kiểm tra Svelte/TypeScript và 12 test frontend/Agent SDK đạt. `cargo check` đạt; `cargo test --locked` biên dịch được binary test, nhưng Windows Application Control chặn thực thi binary mới (os error 4551), nên chưa xác nhận các test Rust mới chạy thành công. `npm run test:mascot` kiểm tra bằng Chromium + IPC giả lập: phân biệt chuột trái/phải, không tràn viewport ở DPI 125%, focus ô nhập và hiện câu trả lời trong bong bóng. Kiểm tra này không thay cho native smoke test về trong suốt, menu hệ điều hành và nhiều màn hình. Chưa tạo bộ cài release; không có API key nên chưa kiểm tra chat/dịch có phí với dịch vụ thật.
+
+## Nền tảng đang phát triển
+
+Workspace `shared/` chứa schema Zod và kiểu đồng bộ dự thảo; chạy `npm run build:shared` để biên dịch. Các workspace `cloud/` và `admin/` hiện chỉ là khung. Lịch sử chat dùng SQLite qua Rust; lần đầu mở, ứng dụng nhập `history.json` và giữ bản gốc là `history.json.bak` nếu chưa có bản sao. Việc nâng cấp trên desktop Windows chưa được kiểm chứng do Windows Application Control. Xem trạng thái từng phase trong `plans/20261028-michiyo-platform/plan.md`.
 
 ## Kiến trúc
 
@@ -88,7 +95,7 @@ MyMemory/LibreTranslate/Google vẫn dùng Rust reqwest: timeout tổng 60 giây
 
 Frontend không gọi mạng provider. CSP production chỉ cho tài nguyên nội bộ, ảnh data/blob và IPC; dev thêm WebSocket của Vite. Markdown được DOMPurify sanitize. Dữ liệu cấu hình không chứa API key. Windows dùng Credential Manager, macOS dùng Keychain; lỗi keychain được báo thay vì lưu plaintext.
 
-`settings.json`, `history.json`, `skins/` nằm trong thư mục app data của `app.michiyo.desktop` (Windows thường `%APPDATA%/app.michiyo.desktop`). Lịch sử và cấu hình được lưu cục bộ dạng JSON, không mã hóa; dùng nút Xóa để xóa hội thoại nhạy cảm. Khóa API nằm riêng trong OS keychain.
+`settings.json`, `michiyo.db`, `history.json.bak` (nếu có) và `skins/` nằm trong thư mục app data của `app.michiyo.desktop` (Windows thường `%APPDATA%/app.michiyo.desktop`). Lịch sử và cấu hình không được mã hóa. Bản sao lịch sử cũ không bị xóa khi xóa hội thoại trong ứng dụng; hãy quản lý bản sao này nếu chứa dữ liệu nhạy cảm. Khóa API nằm riêng trong OS keychain.
 
 Phím tắt được parse, kiểm tra trùng và đăng ký với hệ điều hành. Nếu đăng ký thất bại, phục hồi bộ phím cũ; frontend hoàn tác cấu hình đã lưu. Thay đổi áp dụng ngay. Cửa sổ Chat/Dịch/Cài đặt được tạo khi dùng lần đầu, tránh mở sẵn nhiều WebView lúc idle.
 

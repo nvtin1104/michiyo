@@ -4,6 +4,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { call, desktop } from '../lib/api';
   const items = [
+    { action: 'main', label: 'Mở Michiyo', icon: 'M2 7l6-5 6 5v7H2V7Z' },
     { action: 'chat', label: 'Trò chuyện', icon: 'M3 3h10v7H7l-4 3V3Z' },
     {
       action: 'translate',
