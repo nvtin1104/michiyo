@@ -13,7 +13,10 @@
     }
   ],
   "ai": { "binding": "AI" },
-  "triggers": { "crons": ["17 3 * * *"] },
+  "queues": {
+    "producers": [{ "binding": "IG_QUEUE", "queue": "michiyo-instagram" }],
+    "consumers": [{ "queue": "michiyo-instagram", "max_retries": 10, "dead_letter_queue": "michiyo-instagram-dead" }]
+  },
   "vars": {
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
@@ -21,6 +24,7 @@
     "DEFAULT_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct",
     "ALLOWED_CHAT_MODELS": "@cf/meta/llama-3.1-8b-instruct,@cf/meta/llama-3.3-70b-instruct-fp8-fast"
   }
-  // Secrets (set with `wrangler secret put`): ENCRYPTION_KEY (base64, 32 bytes).
+  // Secrets (set with `wrangler secret put`): ENCRYPTION_KEY (base64, 32 bytes),
+  // IG_VERIFY_TOKEN and IG_APP_SECRET for webhook intake.
   // Local development only, in .dev.vars: DEV_ADMIN_TOKEN. Never set it in production.
 }

@@ -1,10 +1,13 @@
 import { app } from './app';
 import type { Env } from './env';
-import { purgeTombstones } from './sync';
+import { storeDelivery } from './instagram';
 
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(purgeTombstones(env));
+  async queue(batch: MessageBatch<{ payload: string; receivedAt: number }>, env: Env) {
+    for (const message of batch.messages) {
+      try { await storeDelivery(env, message.body); message.ack(); }
+      catch { message.retry(); }
+    }
   },
 };

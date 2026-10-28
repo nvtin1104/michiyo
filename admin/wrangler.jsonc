@@ -1,0 +1,7 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "michiyo-admin",
+  "pages_build_output_dir": ".svelte-kit/cloudflare",
+  "compatibility_date": "2026-10-01",
+  "services": [{ "binding": "MICHIYO_API", "service": "michiyo-cloud" }]
+}

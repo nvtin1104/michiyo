@@ -14,5 +14,8 @@ shared/dist/
 .dev.vars*
 
 # Cloudflare Worker local state and secrets
+/.wrangler/
 cloud/.dev.vars
 cloud/.wrangler/
+admin/.svelte-kit/
+admin/.wrangler/

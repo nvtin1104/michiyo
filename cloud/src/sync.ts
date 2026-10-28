@@ -1,7 +1,6 @@
 import { PushRequest, type PullResponse, type PushResponse, type SyncRecord } from '../../shared/src/sync';
 import type { Env } from './env';
 
-const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_RECORD_BYTES = 1_100_000;
 const PULL_LIMIT = 500;
 
@@ -15,11 +14,10 @@ async function store(env: Env, item: SyncRecord): Promise<boolean> {
   const r = item.record;
   const data = JSON.stringify(r);
   if (data.length > MAX_RECORD_BYTES) throw new SyncError('record_too_large');
-  const next = '(SELECT COALESCE(MAX(server_seq), 0) + 1 FROM sync_records)';
   const result = await env.DB.prepare(
     `INSERT INTO sync_records (type, id, server_seq, updated_at, deleted_at, device_id, rev, data)
-     VALUES (?, ?, ${next}, ?, ?, ?, ?, ?)
-     ON CONFLICT(type, id) DO UPDATE SET server_seq = ${next}, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+     VALUES (?, ?, 0, ?, ?, ?, ?, ?)
+     ON CONFLICT(type, id) DO UPDATE SET updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
        device_id = excluded.device_id, rev = excluded.rev, data = excluded.data
      WHERE excluded.updated_at > sync_records.updated_at
         OR (excluded.updated_at = sync_records.updated_at AND excluded.device_id > sync_records.device_id)`,
@@ -57,12 +55,6 @@ export async function pull(env: Env, cursor: string | undefined): Promise<PullRe
     cursor: String(last ? last.server_seq : after),
     more: results.length > PULL_LIMIT,
   };
-}
-
-/** Tombstones older than 30 days are dropped; a device offline for longer must resync from scratch. */
-export async function purgeTombstones(env: Env, now = Date.now()): Promise<number> {
-  const r = await env.DB.prepare('DELETE FROM sync_records WHERE deleted_at IS NOT NULL AND deleted_at < ?').bind(now - PURGE_AFTER_MS).run();
-  return r.meta.changes;
 }
 
 export async function deleteAllSyncedData(env: Env): Promise<number> {

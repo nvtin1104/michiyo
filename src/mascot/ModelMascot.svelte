@@ -5,7 +5,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { call, desktop } from '../lib/api';
   import type { Pose } from './machine';
-  import manifest from '../../public/skins/reze/manifest.json';
+  import manifest from './reze-manifest.json';
   export let state: Pose = 'idle';
   export let speed = 1;
   export let reduced = false;

@@ -90,6 +90,22 @@ describe('pairing and device auth', () => {
     expect((await call(`/v1/admin/devices/${devices[0]!.id}`, { method: 'DELETE', headers: ADMIN })).status).toBe(200);
     expect((await call('/v1/me', { headers: { Authorization: `Bearer ${token}` } })).status).toBe(401);
   });
+
+  it('allows only an admin to rename an active device', async () => {
+    await pair();
+    const { devices } = (await (await call('/v1/admin/devices', { headers: ADMIN })).json()) as { devices: { id: string }[] };
+    const path = `/v1/admin/devices/${devices[0]!.id}`;
+    const rename = (name: unknown, headers: Record<string, string> = ADMIN) =>
+      call(path, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    expect((await rename('New', {})).status).toBe(401);
+    expect((await rename('   ')).status).toBe(400);
+    expect((await rename('x'.repeat(61))).status).toBe(400);
+    expect((await rename('  Máy mới  ')).status).toBe(200);
+    const listed = (await (await call('/v1/admin/devices', { headers: ADMIN })).json()) as { devices: { name: string }[] };
+    expect(listed.devices[0]!.name).toBe('Máy mới');
+    await call(path, { method: 'DELETE', headers: ADMIN });
+    expect((await rename('New')).status).toBe(404);
+  });
 });
 
 describe('AI proxy', () => {

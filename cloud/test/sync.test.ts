@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import type { Env } from '../src/env';
-import { purgeTombstones } from '../src/sync';
 import { createD1 } from './d1';
 
 const ADMIN = { Authorization: 'Bearer dev-admin-token' };
@@ -69,13 +68,12 @@ describe('sync', () => {
     expect((await pullAs(auth, cursor)).records).toEqual([]);
   });
 
-  it('propagates tombstones and purges them after 30 days', async () => {
+  it('retains old tombstones and rejects a stale offline device', async () => {
     const auth = await device();
     await pushAs(auth, note({ updated_at: 300, deleted_at: 300, rev: 2 }));
+    const stale = await pushAs(auth, note({ updated_at: 100, rev: 1 }));
+    expect(stale.rejected).toHaveLength(1);
     expect((await pullAs(auth)).records[0].record.deleted_at).toBe(300);
-    expect(await purgeTombstones(env, 300 + 29 * 86_400_000)).toBe(0);
-    expect(await purgeTombstones(env, 300 + 31 * 86_400_000)).toBe(1);
-    expect((await pullAs(auth)).records).toEqual([]);
   });
 
   it('rejects malformed batches and pages large pulls', async () => {
@@ -103,5 +101,40 @@ describe('sync', () => {
     expect(summary).toEqual([{ type: 'note', records: 2, tombstones: 1 }]);
     expect(((await (await call('/v1/admin/sync', { method: 'DELETE', headers: ADMIN })).json()) as any).deleted).toBe(2);
     expect((await pullAs(auth)).records).toEqual([]);
+  });
+
+  it('lists only live records of an allowed type for admins', async () => {
+    const auth = await device();
+    await pushAs(auth, note(), note({ id: 'deleted', updated_at: 200, deleted_at: 200 }));
+    expect((await call('/v1/admin/sync/records?type=note')).status).toBe(401);
+    expect((await call('/v1/admin/sync/records?type=message', { headers: ADMIN })).status).toBe(400);
+    expect((await call('/v1/admin/sync/records?type=note&cursor=1x', { headers: ADMIN })).status).toBe(400);
+    const res = await call('/v1/admin/sync/records?type=note', { headers: ADMIN });
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const data = await res.json() as any;
+    expect(data.records.map((record: any) => record.id)).toEqual(['N1']);
+    expect(data.more).toBe(false);
+  });
+
+  it('paginates admin records without returning tombstones', async () => {
+    const auth = await device();
+    await pushAs(auth, ...Array.from({ length: 101 }, (_, i) => note({ id: `page-${i}`, updated_at: i + 1 })));
+    const first = await (await call('/v1/admin/sync/records?type=note', { headers: ADMIN })).json() as any;
+    expect(first.records).toHaveLength(100);
+    expect(first.more).toBe(true);
+    const second = await (await call(`/v1/admin/sync/records?type=note&cursor=${first.cursor}`, { headers: ADMIN })).json() as any;
+    expect(second.records.map((record: any) => record.id)).toEqual(['page-100']);
+    expect(second.more).toBe(false);
+  });
+
+  it('keeps cursors increasing after the cloud data is wiped', async () => {
+    const auth = await device();
+    await pushAs(auth, note());
+    const before = await pullAs(auth);
+    await call('/v1/admin/sync', { method: 'DELETE', headers: ADMIN });
+    await pushAs(auth, note({ id: 'new', updated_at: 200 }));
+    const after = await pullAs(auth, before.cursor);
+    expect(after.records.map((item: any) => item.record.id)).toEqual(['new']);
+    expect(Number(after.cursor)).toBeGreaterThan(Number(before.cursor));
   });
 });

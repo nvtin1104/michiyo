@@ -4,6 +4,7 @@ import { decrypt, encrypt, normalizeCode, pairingCode, randomToken, sha256Hex } 
 import { allowedModels, DEFAULT_MODEL, EMBED_MODEL, type Env } from './env';
 import { toOpenAiStream } from './stream';
 import { deleteAllSyncedData, pull, push, SyncError } from './sync';
+import { receiveWebhook, verifySubscription } from './instagram';
 
 type Principal = { kind: 'device'; id: string } | { kind: 'key'; id: string; scopes: string[]; dailyLimit: number | null };
 type Vars = { principal: Principal; admin: string };
@@ -114,6 +115,8 @@ function recordUsage(c: Ctx, route: string, model: string, inputChars: number, o
 // ---- pairing ----------------------------------------------------------------------------------
 
 app.get('/v1/health', (c) => c.json({ ok: true }));
+app.get('/v1/ig/webhook', (c) => verifySubscription(new URL(c.req.url), c.env));
+app.post('/v1/ig/webhook', (c) => receiveWebhook(c.req.raw, c.env));
 
 app.post('/v1/pair/start', requireAdmin, async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -246,6 +249,14 @@ admin.get('/devices', async (c) => {
   return c.json({ devices: results });
 });
 
+admin.patch('/devices/:id', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (typeof body?.name !== 'string' || !body.name.trim() || body.name.trim().length > 60) return fail(c, 400, 'invalid_request');
+  const result = await c.env.DB.prepare('UPDATE devices SET name = ? WHERE id = ? AND revoked_at IS NULL')
+    .bind(body.name.trim(), c.req.param('id')).run();
+  return result.meta.changes ? c.json({ ok: true }) : fail(c, 404, 'not_found');
+});
+
 admin.delete('/devices/:id', async (c) => {
   const r = await c.env.DB.prepare('UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').bind(Date.now(), c.req.param('id')).run();
   return r.meta.changes ? c.json({ ok: true }) : fail(c, 404, 'not_found');
@@ -312,6 +323,18 @@ admin.get('/usage', async (c) => {
 admin.get('/sync/summary', async (c) => {
   const { results } = await c.env.DB.prepare('SELECT type, COUNT(*) AS records, SUM(deleted_at IS NOT NULL) AS tombstones FROM sync_records GROUP BY type ORDER BY type').all();
   return c.json({ summary: results });
+});
+admin.get('/sync/records', async (c) => {
+  const type = c.req.query('type');
+  if (!type || !['note', 'habit', 'habit_log', 'event', 'reminder'].includes(type)) return fail(c, 400, 'invalid_type');
+  const raw = c.req.query('cursor') ?? '0';
+  if (!/^(0|[1-9]\d*)$/.test(raw) || !Number.isSafeInteger(Number(raw))) return fail(c, 400, 'invalid_cursor');
+  const { results } = await c.env.DB.prepare(
+    'SELECT server_seq, data FROM sync_records WHERE type = ? AND deleted_at IS NULL AND server_seq > ? ORDER BY server_seq LIMIT 101',
+  ).bind(type, Number(raw)).all<{ server_seq: number; data: string }>();
+  const page = results.slice(0, 100);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ records: page.map((row) => JSON.parse(row.data)), cursor: String(page.at(-1)?.server_seq ?? Number(raw)), more: results.length > 100 });
 });
 admin.delete('/sync', async (c) => c.json({ deleted: await deleteAllSyncedData(c.env) }));
 

@@ -258,3 +258,47 @@ Ngày: 2026-10-28 · Prompt thực thi: `docs/PLATFORM_PROMPT.md`
 - Sửa trong lúc làm: truy vấn gom outbox ban đầu có thể gửi nội dung cũ của một ghi chú đã sửa nhiều lần; test hai thiết bị phát hiện và đã sửa bằng truy vấn lấy đúng bản có `rev` lớn nhất.
 - Kiểm tra: 6 test Worker mới (LWW, tiebreak, idempotent, tombstone, phân trang, xác thực) + toàn bộ 41 test JS đạt, `tsc` cloud sạch; 48 test Rust đạt trong Docker Linux (gồm mô phỏng hai thiết bị qua một server giả cùng luật: hội tụ, tìm kiếm FTS bên nhận, xóa lan truyền, xung đột, phạm vi, cursor); build và 11 script UI đạt.
 - Chưa làm / chưa kiểm chứng: lịch sử trò chuyện chưa có đường đồng bộ (và mặc định không đồng bộ theo yêu cầu); chưa chạy hai bản desktop thật với Worker thật qua mạng (vòng HTTP của `sync/mod.rs` chưa có test tích hợp); trạng thái nhắc nhở (đã bắn/chờ/hoãn) đồng bộ theo LWW nên thiết bị khác thấy cùng trạng thái; chưa có cảnh báo khi thiết bị offline quá 30 ngày.
+
+### P5: bảo vệ bản ghi đã xóa
+
+- Ngừng cron xóa tombstone sau 30 ngày: giao thức hiện chưa có cơ chế buộc thiết bị offline lâu tái đồng bộ an toàn, nên xóa tombstone có thể làm dữ liệu cũ sống lại. Tombstone được giữ cho đến khi có giao thức thu gom an toàn; dung lượng lưu trữ sẽ tăng theo số bản ghi đã xóa. Các tombstone đã bị xóa trước khi cập nhật không thể tự khôi phục.
+- Kiểm tra: `npm test` đạt 41 test, bao gồm tombstone cũ và bản ghi lỗi thời; `npx tsc --noEmit -p cloud/tsconfig.json` đạt. Chưa kiểm chứng trên Worker đã deploy.
+- Việc xóa toàn bộ dữ liệu cloud và reset cursor vẫn cần được thiết kế lại trước khi coi P5 hoàn tất; lịch sử chat và kiểm thử hai desktop thật cũng còn thiếu.
+
+### Kiểm tra toàn bộ plan 2026-10-29
+
+- `npm run build` đạt (Svelte không lỗi/cảnh báo; Vite cảnh báo chunk 3D lớn hơn 500 kB); `npm test` 41/41, Cloud typecheck và `wrangler deploy --dry-run` đạt.
+- 11/12 script giao diện đạt qua Chromium với IPC giả lập; `test:companions` thất bại chờ canvas 3D. Vite dev báo `ModelMascot.svelte` import JSON trực tiếp từ `public/`, không được hỗ trợ trong dev; cần sửa và chạy lại. Không coi đây là kiểm tra desktop thật.
+- `cargo test --locked` Linux Docker đạt 48/48. Windows chạy được 48/49; `providers::agent::tests::dropping_process_tree_stops_owned_worker` thất bại vì exit status thành công, kể cả chạy riêng; chưa xác định nguyên nhân. `cargo fmt --check` trên Windows thất bại với nhiều khác biệt định dạng sẵn có.
+- Wrangler local: áp dụng cả hai migration D1 và kiểm tra HTTP health, ghép nối, push/pull và thu hồi thiết bị thành công. Workers AI không khả dụng trong môi trường local này. Chưa thử ghép nối bằng desktop thật, đồng bộ hai desktop, Cloudflare thật hay triển khai.
+- P0–P5 có triển khai từng phần như các mục phía trên, vẫn còn các giới hạn được ghi; P6 admin mới có khung, P7 bot Instagram và P8 hoàn thiện chưa triển khai, Google Calendar chưa triển khai. Không thể coi toàn bộ plan là hoàn tất.
+
+### Tiếp tục triển khai 2026-10-29
+
+- Chuyển manifest Reze vào mã nguồn để Vite dev tải được; `test:companions` đạt. Test Windows Job Object giờ kiểm tra worker còn sống trước khi đóng job và kết thúc sau đó, không giả định exit code khi Windows đóng job; toàn bộ 49 test Rust Windows đạt.
+- Migration D1 `0003_sync_sequence.sql` giữ bộ đếm cursor qua các lần xóa dữ liệu, cập nhật trong cùng câu lệnh SQL bằng trigger; test xác nhận bản ghi mới vẫn được kéo sau khi xóa cloud. Migration khởi tạo từ sequence lớn nhất còn trong DB, không thể khôi phục sequence đã bị mất trước khi nâng cấp. Xóa cloud vẫn không xóa dữ liệu cục bộ hoặc tự tải lại toàn bộ dữ liệu cũ.
+- Bổ sung API admin đổi tên thiết bị đang hoạt động, có xác thực và kiểm tra đầu vào; UI admin chưa có.
+- Kiểm tra: build đạt; 43 test JavaScript, Cloud typecheck, Wrangler dry-run và 49 test Rust Windows đạt; migration 0003 áp dụng được trên D1 local. Các phần còn lại của P5–P8, Google Calendar và kiểm chứng dịch vụ thật vẫn chưa hoàn tất.
+
+### P6: admin — thiết bị và khóa
+
+- Thêm SvelteKit/adapter Cloudflare trong `admin/`: ghép nối, đổi tên/thu hồi thiết bị; lưu/xóa khóa provider; tạo/thu hồi khóa Michiyo theo scope và hạn mức; xem usage 7 ngày. Khóa tạo mới hiện một lần, ô khóa provider được xóa sau khi lưu.
+- API admin đi qua service binding `MICHIYO_API` với danh sách route cho phép, kiểm tra Origin cho thao tác ghi, chuyển JWT Access để Worker tự xác minh và không cache phản hồi. Không đưa dev token vào frontend. Cần cấu hình Pages Access và Worker cùng audience. Chưa xác minh kết nối thật trên Pages/Access.
+- Kiểm tra: admin check/build đạt; test UI ghép nối và tạo khóa dùng API giả lập đạt; 45 test JS đạt, gồm bridge xác minh giới hạn route, JWT và Origin. `npm audit --omit=dev` báo 4 mục mức thấp theo chuỗi phụ thuộc SvelteKit/vite-plugin-svelte/deepmerge; đề xuất `--force` hạ phiên bản phá tương thích nên chưa áp dụng. P6 còn thiếu tổng quan, báo cáo nâng cao, quản lý dữ liệu/model, kiểm tra khóa provider, bot và kiểm thử triển khai thật. P7–P8 và Google Calendar chưa hoàn tất.
+
+### P6/P8: dữ liệu admin và CI
+
+- Admin có tổng quan cơ bản, xem bản ghi còn hoạt động theo loại (ghi chú, thói quen, check-in, lịch, nhắc nhở) và xuất JSON theo loại. API yêu cầu admin, phân trang, không trả tombstone hay lịch sử chat; xuất tối đa 10.000 bản ghi và không đảm bảo snapshot khi có thay đổi đồng thời. Không cung cấp xóa dữ liệu từ UI vì đồng bộ lại/xóa ở thiết bị chưa được thiết kế hoàn chỉnh.
+- Thêm job CI Linux cho shared, test JS, Cloud typecheck và admin check/build; chưa chạy workflow trên GitHub. Kiểm tra tại máy: 47 test JS, Cloud typecheck, admin check/build và test UI admin (API giả lập) đạt.
+- Còn thiếu phần báo cáo, model, kiểm tra khóa provider, xóa dữ liệu an toàn và triển khai Access thật của P6; phần còn lại của P5/P8, P7 và Google Calendar chưa triển khai đầy đủ.
+
+### P7: tiếp nhận webhook Instagram
+
+- Thêm xác minh challenge và chữ ký HMAC SHA-256 theo raw body, giới hạn payload 96 KB, chỉ chấp nhận object Instagram và chỉ trả 200 sau khi enqueue thành công. Queue consumer lưu delivery vào bảng D1 qua migration 0004, loại delivery trùng byte bằng hash; lỗi lưu được retry và cấu hình dead-letter queue.
+- Kiểm tra: 51 test JS (4 mới), Cloud typecheck và Wrangler dry-run đạt. Trên Wrangler local, migration 0004 áp dụng thành công, webhook có chữ ký hợp lệ trả 200 và Queue consumer lưu được một delivery vào D1.
+- Chưa có OAuth, dedupe từng sự kiện/mid, flow engine, gửi tin, giao diện bot, giới hạn tần suất webhook, retention/xóa inbox hay xử lý dead-letter. Payload được lưu nguyên trong D1 và có thể chứa dữ liệu cá nhân; chưa nên kết nối production. Các resource Queue, secret, Meta tester và deploy thật chưa được cấu hình hoặc kiểm chứng.
+
+### Chạy lại kiểm tra 2026-10-29
+
+- Build desktop và admin, admin check, Cloud typecheck, Wrangler dry-run, 51 test JavaScript và 49 test Rust Windows đạt. Các kiểm tra giao diện với IPC/API giả lập đạt khi chạy lại: companion 3D timeout ở lượt đầu trong lúc Vite tối ưu dependency và reload, sau đó đạt khi chạy riêng với server ổn định; 12 script còn lại đạt ở lượt đầu.
+- Kết quả này không thay thế chạy desktop thật, Cloudflare/Meta thật, hoặc triển khai các phần plan chưa có.

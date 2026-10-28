@@ -62,7 +62,11 @@ Script kiểm tra nhập Chat, các tab/API key ẩn, phím tắt, lỗi khi g�
 
 ## Nền tảng đang phát triển
 
-Workspace `shared/` chứa schema Zod và kiểu đồng bộ dự thảo; chạy `npm run build:shared` để biên dịch. Các workspace `cloud/` và `admin/` hiện chỉ là khung. Lịch sử chat dùng SQLite qua Rust; lần đầu mở, ứng dụng nhập `history.json` và giữ bản gốc là `history.json.bak` nếu chưa có bản sao. Việc nâng cấp trên desktop Windows chưa được kiểm chứng do Windows Application Control. Xem trạng thái từng phase trong `plans/20261028-michiyo-platform/plan.md`.
+Workspace `shared/` chứa schema Zod và kiểu đồng bộ; chạy `npm run build:shared` để biên dịch. `cloud/` là Worker API và `admin/` là giao diện quản trị Cloudflare Pages đang phát triển. Lịch sử chat dùng SQLite qua Rust; lần đầu mở, ứng dụng nhập `history.json` và giữ bản gốc là `history.json.bak` nếu chưa có bản sao. Xem trạng thái từng phase trong `plans/20261028-michiyo-platform/plan.md`.
+
+Admin hiện hỗ trợ ghép nối, đổi tên/thu hồi thiết bị, quản lý khóa, xem lượt dùng gần đây và xem/xuất dữ liệu đồng bộ theo loại. Xuất JSON giới hạn 10.000 bản ghi mỗi loại, không phải snapshot nhất quán nếu dữ liệu đổi trong lúc xuất. Chạy `npm run check --workspace @michiyo/admin` và `npm run build --workspace @michiyo/admin`; `npm run test:admin` cần server `npm run dev --workspace @michiyo/admin -- --host 127.0.0.1 --port 4174` và sử dụng API giả lập. Với Pages thật, cấu hình service binding `MICHIYO_API` tới Worker, đặt Cloudflare Access trước admin và cấu hình `ACCESS_TEAM_DOMAIN` cùng `ACCESS_AUD` trên Worker sao cho JWT từ ứng dụng Access đó được Worker xác minh. Dev server thông thường không cung cấp service binding hay phiên Access nên không vận hành API thật. Không đặt `DEV_ADMIN_TOKEN` trong môi trường production. Chưa kiểm chứng triển khai Pages/Access thật.
+
+Webhook Instagram mới ở giai đoạn tiếp nhận: kiểm tra challenge và chữ ký, gửi delivery vào Queue rồi lưu payload vào D1; chưa xử lý flow hay trả lời. Cấu hình Queue và dead-letter queue trong `cloud/wrangler.jsonc`, tạo các resource trước khi triển khai, áp dụng migration, đặt secret `IG_VERIFY_TOKEN` và `IG_APP_SECRET` qua Wrangler. Payload gốc có thể chứa thông tin cá nhân và hiện được lưu trong D1 không có thời hạn tự xóa; chưa có công cụ quản lý/xóa inbox hay xử lý hàng đợi lỗi. Chưa nên kết nối webhook production cho đến khi các phần đó và flow engine hoàn tất.
 
 ## Kiến trúc
 

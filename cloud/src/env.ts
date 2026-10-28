@@ -11,6 +11,9 @@ export interface Env {
   AI_GATEWAY_ID?: string;
   DEFAULT_CHAT_MODEL?: string;
   ALLOWED_CHAT_MODELS?: string;
+  IG_VERIFY_TOKEN?: string;
+  IG_APP_SECRET?: string;
+  IG_QUEUE?: Queue<{ payload: string; receivedAt: number }>;
 }
 
 export const DEFAULT_MODEL = '@cf/meta/llama-3.1-8b-instruct';

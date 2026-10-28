@@ -1,6 +1,20 @@
 name: Windows checks
 on: [push, pull_request, workflow_dispatch]
 jobs:
+  platform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build:shared
+      - run: npm test
+      - run: npm run typecheck --workspace @michiyo/cloud
+      - run: npm run check --workspace @michiyo/admin
+      - run: npm run build --workspace @michiyo/admin
   desktop:
     runs-on: windows-latest
     steps:

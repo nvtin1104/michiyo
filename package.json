@@ -23,7 +23,8 @@
     "test:home": "node scripts/verify-home.mjs",
     "test:ai": "node scripts/verify-ai.mjs",
     "test:sync": "node scripts/verify-sync.mjs",
-    "test:suggestions": "node scripts/verify-suggestions.mjs"
+    "test:suggestions": "node scripts/verify-suggestions.mjs",
+    "test:admin": "node scripts/verify-admin.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.310",
