@@ -57,8 +57,8 @@
         ...JSON.parse(localStorage.getItem('preview-config') || '{}'),
       };
     }
-    // Fall back for configurations saved with the removed 3D skin.
-    if (config.skin === 'reze') config.skin = 'default';
+    // Migrate the old built-in default; the original remains selectable by name.
+    if (config.skin === 'default') config.skin = 'reze';
     locale.set(config.locale);
   }
   async function save() {

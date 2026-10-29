@@ -103,13 +103,13 @@
   let show = false;
   let stored: Record<string, boolean> = {};
   let dirtyTimer: ReturnType<typeof setTimeout>;
-  let skins = ['default'];
+  let skins = ['reze', 'moon-gardener'];
   let skinDirectory = '';
   onMount(() => {
     if (desktop) {
       call<Record<string, boolean>>('secret_status').then((v) => (stored = v));
       call<{ names: string[]; directory: string }>('list_skins').then((v) => {
-        skins = v.names;
+        skins = [...new Set(['reze', 'moon-gardener', ...v.names.filter((name) => name !== 'default')])];
         skinDirectory = v.directory;
       });
     }
@@ -141,7 +141,7 @@
 <div class="settings-shell">
   <header class="settings-header">
     <h1>{t('Cài đặt', $locale)}</h1>
-    <span>Michiyo</span>
+    <span>{t('Tùy chỉnh trải nghiệm của bạn', $locale)}</span>
   </header>
   <div class="settings-layout">
     <nav aria-label="Nhóm cài đặt">
@@ -562,8 +562,10 @@
             options={skins.map((value) => ({
               value,
               label:
-                value === 'default'
+                value === 'moon-gardener'
                   ? 'Moon gardener'
+                  : value === 'reze'
+                    ? 'Reze (pixel)'
                   : value,
             }))}
             onchange={changed}
@@ -618,7 +620,7 @@
               const v = await call<{ names: string[]; directory: string }>(
                 'list_skins',
               );
-              skins = v.names;
+              skins = [...new Set(['reze', 'moon-gardener', ...v.names.filter((name) => name !== 'default')])];
               skinDirectory = v.directory;
             }}>↻ Quét skin</button
           >

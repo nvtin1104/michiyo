@@ -716,51 +716,53 @@ body:has(.preview) {
 }
 .settings-shell .settings-header {
   flex: none;
-  height: 48px;
-  padding: 0 18px;
+  min-height: 64px;
+  padding: 12px 24px;
   margin: 0;
   border-bottom: 1px solid #e2e5dd;
   gap: 12px;
 }
 .settings-shell .settings-header h1 {
   font-family: 'Segoe UI', sans-serif !important;
-  font-size: 16px !important;
+  font-size: 18px !important;
   font-weight: 600;
   letter-spacing: 0;
   margin: 0;
 }
 .settings-header > span {
-  font-size: 11px;
-  color: #899086;
+  font-size: 12px;
+  color: #718076;
 }
 .settings-shell .settings-layout {
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr);
+  grid-template-columns: 168px minmax(0, 1fr);
   gap: 0;
   flex: 1;
   min-height: 0;
 }
 .settings-shell nav {
-  padding: 12px 8px;
+  padding: 16px 10px;
   border-right: 1px solid #e2e5dd;
-  background: #f4f5f0;
+  background: #f1f4ef;
+  overflow-y: auto;
 }
 .settings-shell nav button {
-  height: 34px;
-  margin: 0 0 3px;
-  padding: 0 10px;
-  font-size: 12px;
-  border-radius: 5px;
+  min-height: 38px;
+  margin: 0 0 4px;
+  padding: 0 12px;
+  font-size: 13px;
+  border-radius: 8px;
   gap: 0;
   align-items: center;
 }
 .settings-shell nav button.active {
-  background: #e5e9df;
-  color: #303e33;
+  background: #fff;
+  color: #244b33;
   font-weight: 600;
+  box-shadow: 0 1px 4px #263b2b12;
 }
 .settings-shell .settings-content {
-  padding: 16px 20px 12px;
+  padding: 24px 28px;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #c8cec2 transparent;
@@ -768,7 +770,7 @@ body:has(.preview) {
   min-width: 0;
 }
 .settings-shell h2 {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   margin: 0 0 14px;
 }
@@ -976,9 +978,22 @@ body:has(.preview) {
   font-weight: 600;
 }
 @media (max-width: 520px) {
+  .settings-shell .settings-header { padding: 10px 16px; min-height: 52px; }
+  .settings-header > span { display: none; }
   .settings-shell .settings-layout {
-    grid-template-columns: 100px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
+  .settings-shell nav {
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid #e2e5dd;
+  }
+  .settings-shell nav button { flex: none; width: auto; margin: 0; white-space: nowrap; }
   .settings-shell .settings-content {
     padding: 14px 12px;
   }

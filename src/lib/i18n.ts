@@ -6,6 +6,7 @@ const en: Record<string, string> = {
   'Dịch ngữ cảnh': 'Contextual translation',
   Chung: 'General',
   'Cài đặt': 'Settings',
+  'Tùy chỉnh trải nghiệm của bạn': 'Personalize your experience',
   Dịch: 'Translate',
   'Phím tắt': 'Shortcuts',
   'Giao diện': 'Appearance',

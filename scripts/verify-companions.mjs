@@ -48,7 +48,9 @@ try {
       },
     };
   });
+  const rezeLoaded = page.waitForResponse((r) => r.url().includes('/skins/reze/spritesheet.png') && r.ok());
   await page.goto('http://127.0.0.1:1420/?view=mascot');
+  await rezeLoaded;
   const mascot = page.locator('.mascot-window');
   await page.waitForFunction(() => window.mask.some(Boolean));
   await page.waitForFunction(
@@ -92,15 +94,21 @@ try {
     ),
     opened,
   );
-  // Older settings that selected the removed skin must render the default mascot.
+  // Reze is bundled, and the original mascot remains selectable.
+  const moon = page.waitForResponse((r) => r.url().includes('/skins/default/spritesheet.png') && r.ok());
+  await page.evaluate(() => {
+    window.config = { skin: 'moon-gardener' };
+    window.emitMockEvent('config-changed');
+  });
+  await moon;
   await page.evaluate(() => {
     window.config = { skin: 'reze' };
     window.emitMockEvent('config-changed');
   });
-  await page.waitForFunction(() => window.mask.some(Boolean));
+  await page.waitForFunction(() => document.querySelector('.sprite')?.dataset.skin === 'reze');
   assert.equal(await page.locator('[data-renderer="three"]').count(), 0);
   assert.deepEqual(errors, []);
-  console.log('PASS: default mascot interactions work and the old skin setting falls back safely.');
+  console.log('PASS: mascot interactions and switching between bundled Reze and Moon gardener skins.');
 } finally {
   await browser.close();
 }

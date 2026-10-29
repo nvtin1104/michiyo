@@ -15,7 +15,7 @@ export type Reaction =
   | 'carried'
   | 'settling'
   | 'waking';
-export type Pose = State | Reaction;
+export type Pose = State | Reaction | 'walk' | 'sit' | 'wave';
 const states: State[] = [
   'idle',
   'hover',

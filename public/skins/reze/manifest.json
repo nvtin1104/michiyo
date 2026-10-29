@@ -1,0 +1,120 @@
+{
+  "name": "Reze (pixel)",
+  "frameWidth": 320,
+  "frameHeight": 320,
+  "states": {
+    "idle": {
+      "frames": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "fps": 2
+    },
+    "hover": {
+      "frames": [
+        0,
+        8
+      ],
+      "fps": 2
+    },
+    "listening": {
+      "frames": [
+        2
+      ],
+      "fps": 2
+    },
+    "thinking": {
+      "frames": [
+        3
+      ],
+      "fps": 2
+    },
+    "talking": {
+      "frames": [
+        4,
+        0
+      ],
+      "fps": 2
+    },
+    "happy": {
+      "frames": [
+        5
+      ],
+      "fps": 2
+    },
+    "error": {
+      "frames": [
+        6
+      ],
+      "fps": 2
+    },
+    "sleep": {
+      "frames": [
+        7
+      ],
+      "fps": 2
+    },
+    "greeting": {
+      "frames": [
+        8,
+        9
+      ],
+      "fps": 2
+    },
+    "touched": {
+      "frames": [
+        10
+      ],
+      "fps": 2
+    },
+    "petting": {
+      "frames": [
+        11
+      ],
+      "fps": 2
+    },
+    "dragging": {
+      "frames": [
+        12
+      ],
+      "fps": 2
+    },
+    "settling": {
+      "frames": [
+        13,
+        0
+      ],
+      "fps": 2
+    },
+    "waking": {
+      "frames": [
+        1,
+        0
+      ],
+      "fps": 2
+    },
+    "walk": {
+      "frames": [
+        15,
+        16
+      ],
+      "fps": 4
+    },
+    "sit": {
+      "frames": [
+        10,
+        13
+      ],
+      "fps": 2
+    },
+    "wave": {
+      "frames": [
+        8,
+        9
+      ],
+      "fps": 4
+    }
+  }
+}

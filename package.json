@@ -10,6 +10,7 @@
     "tauri": "node scripts/tauri.mjs",
     "test:ui": "node scripts/verify-ui.mjs",
     "test:mascot": "node scripts/verify-mascot.mjs",
+    "test:chat-motion": "node scripts/verify-chat-motion.mjs",
     "test:companions": "node scripts/verify-companions.mjs",
     "test:settings": "node scripts/verify-settings.mjs",
     "format": "prettier --write src scripts *.json *.ts *.js *.html",

@@ -13,7 +13,7 @@ fn root(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
 #[tauri::command]
 pub fn list_skins(app: tauri::AppHandle) -> Result<Value, String> {
     let root = root(&app)?;
-    let mut names = vec!["default".to_string()];
+    let mut names = vec!["reze".to_string(), "moon-gardener".to_string()];
     for entry in std::fs::read_dir(&root)
         .map_err(|e| e.to_string())?
         .flatten()

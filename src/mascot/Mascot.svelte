@@ -18,6 +18,7 @@
   $: if (ready) refreshPose(state, reduced);
   onMount(() => {
     let app: Application;
+    let initialized = false;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     let visibility: () => void;
@@ -105,7 +106,7 @@
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(app.canvas, 0, 0, 160, 160);
       const pixels = ctx.getImageData(0, 0, 160, 160).data;
-      if (desktop && !maskBusy) {
+      if (desktop && new URLSearchParams(location.search).get('view') === 'mascot' && !maskBusy) {
         maskBusy = true;
         call('set_hit_mask', {
           mask: Array.from({ length: 25600 }, (_, i) => pixels[i * 4 + 3] > 16),
@@ -145,7 +146,7 @@
       try {
         let source = '/skins/default/spritesheet.png';
         let data;
-        if (name !== 'default' && desktop) {
+        if (!['default', 'moon-gardener', 'reze'].includes(name) && desktop) {
           const loaded = await call<{
             manifest: typeof manifest;
             image: string;
@@ -153,7 +154,9 @@
           data = loaded.manifest;
           source = loaded.image;
         } else {
-          data = await fetch('/skins/default/manifest.json').then((r) =>
+          const bundled = name === 'reze' ? 'reze' : 'default';
+          source = `/skins/${bundled}/spritesheet.png`;
+          data = await fetch(`/skins/${bundled}/manifest.json`).then((r) =>
             r.json(),
           );
         }
@@ -228,6 +231,7 @@
         autoDensity: true,
         preference: 'webgl',
       });
+      initialized = true;
       if (disposed) {
         app.destroy(true);
         return;
@@ -239,6 +243,7 @@
       app.stage.addChild(sprite);
       ready = true;
       await changeSkin(skin);
+      if (disposed) return;
       visibility = () => {
         clearTimeout(timer);
         if (!document.hidden) draw();
@@ -262,10 +267,10 @@
       offVisible?.();
       if (visibility)
         document.removeEventListener('visibilitychange', visibility);
-      app?.destroy(true);
+      if (initialized) app.destroy(true);
       sheet?.destroy(true);
     };
   });
 </script>
 
-<div class="sprite" bind:this={host}></div>
+<div class="sprite" data-skin={skin} bind:this={host}></div>

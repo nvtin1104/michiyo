@@ -137,7 +137,7 @@ Vào Cài đặt → Giao diện để xem đường dẫn, nhấn **Quét skin*
 }
 ```
 
-Cần đủ tám state; frame index phải nằm trong PNG. Skin không hợp lệ fallback về skin mặc định. Bản mặc định do `scripts/create-skin.py` vẽ bằng Pillow, không dựa trên nhân vật có bản quyền. Có thể tái sinh bằng `python scripts/create-skin.py` sau khi cài Pillow. Font tiêu đề VT323 được đóng gói cục bộ, có license OFL trong `public/fonts/`; nội dung dùng font hệ thống hỗ trợ tiếng Việt.
+Cần đủ tám state; frame index phải nằm trong PNG. Reze pixel là skin mặc định, dùng ở chat và desktop; skin Moon gardener trước đây vẫn chọn được trong Cài đặt. Skin không hợp lệ fallback về Moon gardener. Các tư thế đi, ngồi và vẫy là tùy chọn, skin cũ thiếu tư thế sẽ dùng `idle`. Moon gardener được vẽ bằng Pillow và có thể tái sinh bằng `python scripts/create-skin.py`. Font tiêu đề VT323 được đóng gói cục bộ, có license OFL trong `public/fonts/`; nội dung dùng font hệ thống hỗ trợ tiếng Việt.
 
 Renderer dùng nearest sampling, nền alpha, sprite 8–12 FPS, tween opacity ngắn bằng requestAnimationFrame, chớp mắt ngẫu nhiên và nhìn theo chuột ở skin mẫu. Reduced motion tôn trọng cả thiết lập và `prefers-reduced-motion`; sleep giảm còn 1 FPS. Ẩn mascot hoặc document hidden dừng render. Hit test dùng alpha mask 160×160 của frame hiện tại và ánh xạ theo DPI/scale; Rust kiểm tra con trỏ để có thể bắt chuột lại sau khi bật xuyên chuột. Đây là polling 60 ms, cần kiểm tra độ trễ khi thao tác nhanh trên máy đích.
 

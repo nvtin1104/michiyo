@@ -333,7 +333,7 @@
         <span class="topbar-crumb">
           <strong>Không gian làm việc</strong> / {workspaceRoutes.find(([id]) => id === route)?.[1] || ''}
         </span>
-      {:else}
+      {:else if !isChat}
         <div class="topbar-brand">
           <span class="topbar-logo-icon">🌸</span>
           <span class="topbar-logo-text">Michiyo</span>
@@ -407,7 +407,7 @@
     <!-- Primary Chat Route -->
     {#if chatVisited}
       <div class="shell-chat-container" hidden={route !== 'chat'}>
-        <Chat {config} onNavigate={navigate} />
+        <Chat {config} active={isChat} onNavigate={navigate} />
       </div>
     {/if}
 
@@ -519,15 +519,19 @@
     grid-template-columns: 224px minmax(0, 1fr);
   }
   .shell.workspace-layout.sidebar-closed {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 64px minmax(0, 1fr);
   }
   .sidebar-closed > aside {
-    display: none;
-    visibility: hidden;
-    overflow: hidden;
-    padding: 0;
-    border: 0;
+    padding: 20px 8px 14px;
   }
+  .sidebar-closed .brand { justify-content: center; padding: 0 0 16px; }
+  .sidebar-closed .brand-copy,
+  .sidebar-closed .aside-chat-action span,
+  .sidebar-closed .nav-heading,
+  .sidebar-closed aside nav button span,
+  .sidebar-closed .shell-status { display: none; }
+  .sidebar-closed .aside-chat-action,
+  .sidebar-closed aside nav button { justify-content: center; padding: 10px; }
 
   aside {
     display: flex;
@@ -593,12 +597,14 @@
     background: #284734;
   }
 
-  nav {
+  aside nav {
     display: flex;
     flex-direction: column;
     gap: 3px;
     min-height: 0;
     overflow-y: auto;
+    border: 0;
+    padding: 0;
   }
   .nav-heading {
     font-size: 10px;
@@ -607,7 +613,7 @@
     color: #7b8d7e;
     padding: 6px 8px 4px;
   }
-  nav button {
+  aside nav button {
     display: flex;
     align-items: center;
     gap: 9px;
@@ -620,17 +626,19 @@
     text-align: left;
     cursor: pointer;
     transition: all 0.12s ease;
+    margin: 0;
   }
-  nav button svg {
+  aside nav button svg {
     width: 16px;
     height: 16px;
     flex-shrink: 0;
   }
-  nav button:hover {
+  aside nav button span { color: inherit; font-size: inherit; }
+  aside nav button:hover {
     background: #e2ebe1;
     color: #1f3024;
   }
-  nav button.active {
+  aside nav button.active {
     background: #ffffff;
     color: #244b33;
     font-weight: 600;
@@ -658,6 +666,7 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
     overflow: hidden;
     position: relative;
   }
@@ -670,14 +679,19 @@
     padding: 10px 24px;
     background: #ffffff;
     border-bottom: 1px solid #e2e8e1;
-    min-height: 48px;
+    min-height: 60px;
     flex-shrink: 0;
+    margin: 0;
   }
   .chat-layout .shell-topbar {
+    position: absolute;
+    top: 16px;
+    right: 24px;
+    z-index: 2;
+    min-height: 0;
+    padding: 0;
     background: transparent;
-    border-bottom: 0;
-    padding: 16px 32px 0;
-    min-height: unset;
+    border: 0;
   }
   .topbar-brand {
     display: flex;
@@ -718,6 +732,9 @@
   .topbar-crumb {
     font-size: 13px;
     color: #627566;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .topbar-crumb strong {
     color: #25392d;
@@ -728,8 +745,12 @@
 
   .topbar-nav {
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 10px;
+    flex: none;
+    border: 0;
+    padding: 0;
   }
   .floating-icon-btn {
     width: 38px;
@@ -744,6 +765,7 @@
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(40, 70, 50, 0.05);
     transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    margin: 0;
   }
   .floating-icon-btn svg {
     width: 18px;
@@ -756,13 +778,12 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 14px rgba(40, 70, 50, 0.12);
   }
-  .floating-icon-btn.active,
-  .floating-icon-btn.topbar-chat-btn {
+  .floating-icon-btn.active {
     background: #345c43;
     border-color: #345c43;
     color: #ffffff;
   }
-  .floating-icon-btn.topbar-chat-btn:hover {
+  .floating-icon-btn.active:hover {
     background: #274733;
   }
   .sr-only {
@@ -789,6 +810,7 @@
     padding: 16px 24px 20px;
     overflow: hidden;
   }
+  .chat-layout .shell-chat-container { padding-top: 68px; }
 
   /* Reminders */
   .reminders {
@@ -829,7 +851,12 @@
   .shell-settings {
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
+  }
+  .shell-chat-container[hidden],
+  .shell-page[hidden],
+  .shell-settings[hidden] {
+    display: none;
   }
 
   .home-grid {
@@ -899,11 +926,24 @@
     .shell.workspace-layout {
       grid-template-columns: 180px minmax(0, 1fr);
     }
+    .shell.workspace-layout.sidebar-closed {
+      grid-template-columns: 64px minmax(0, 1fr);
+    }
     .shell-chat-container {
       padding: 10px 14px 14px;
     }
     .shell-page {
       padding: 20px 18px;
     }
+  }
+  @media (max-width: 520px) {
+    .shell.workspace-layout { grid-template-columns: 160px minmax(0, 1fr); }
+    .shell.workspace-layout.sidebar-closed { grid-template-columns: 64px minmax(0, 1fr); }
+    .shell-topbar { padding: 8px 12px; gap: 8px; }
+    .chat-layout .shell-topbar { top: 12px; right: 14px; padding: 0; }
+    .topbar-nav { gap: 4px; }
+    .floating-icon-btn { width: 34px; height: 34px; }
+    .topbar-crumb strong { display: none; }
+    .cards { flex-wrap: wrap; }
   }
 </style>

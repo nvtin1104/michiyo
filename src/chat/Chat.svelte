@@ -12,7 +12,10 @@
 
   export let config: Config;
   export let compact = false;
+  export let active = true;
   export let onNavigate: ((route: string) => void) | undefined = undefined;
+  let manageTimers: () => void = () => {};
+  $: active, manageTimers();
 
   let composer: HTMLTextAreaElement;
   const focus = () => tick().then(() => composer?.focus());
@@ -21,6 +24,7 @@
     role: 'user' | 'assistant';
     content: string;
     time?: string;
+    animate?: boolean;
   };
 
   let messages: Message[] = [];
@@ -44,7 +48,12 @@
   // Mascot machine & companion state above input
   const mascotMachine = new MascotMachine();
   let mascotPose: Pose = 'idle';
-  let companionMood = 'Michiyo đang lắng nghe bạn…';
+  let ambientPose: Pose = 'sit';
+  let ambientStep = 0;
+  let atRight = false;
+  let systemReduced = false;
+  $: reducedMotion = config.reducedMotion || systemReduced;
+  $: displayedPose = mascotPose === 'idle' && !reducedMotion ? ambientPose : mascotPose;
 
   function syncMascot() {
     mascotPose = mascotMachine.pose;
@@ -57,10 +66,6 @@
 
   function handleMascotClick() {
     reactMascot('touched');
-    companionMood = 'Hehe, xin chào bạn! 🌸';
-    setTimeout(() => {
-      if (!busy) companionMood = 'Michiyo đang lắng nghe bạn…';
-    }, 2500);
   }
 
   function formatTime(d = new Date()) {
@@ -92,7 +97,7 @@
       composer.style.height = `${Math.min(72, Math.max(28, composer.scrollHeight))}px`;
     } else {
       composer.style.height = 'auto';
-      composer.style.height = `${Math.min(160, Math.max(54, composer.scrollHeight))}px`;
+      composer.style.height = `${Math.min(120, Math.max(28, composer.scrollHeight))}px`;
     }
   }
 
@@ -102,7 +107,7 @@
   async function persist() {
     if (!desktop) {
       try {
-        localStorage.setItem('michiyo_messages', JSON.stringify(messages));
+        localStorage.setItem('michiyo_messages', JSON.stringify(messages.map(({ role, content, time }) => ({ role, content, time }))));
       } catch {}
       return;
     }
@@ -131,11 +136,29 @@
     let offSecrets: undefined | (() => void);
     let observer: ResizeObserver | undefined;
     let resizeTimer: ReturnType<typeof setTimeout>;
+    let ambientTimer: ReturnType<typeof setInterval> | undefined;
+    const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
+    const motionChanged = () => { systemReduced = motionQuery.matches; };
+    motionChanged();
+    motionQuery.addEventListener('change', motionChanged);
 
-    mascotTimer = setInterval(() => {
-      mascotMachine.tick(Date.now(), config?.sleepMinutes || 5);
-      syncMascot();
-    }, 250);
+    const updateTimers = () => {
+      clearInterval(mascotTimer);
+      clearInterval(ambientTimer);
+      if (document.hidden || !active) return;
+      mascotTimer = setInterval(() => {
+        mascotMachine.tick(Date.now(), config?.sleepMinutes || 5);
+        syncMascot();
+      }, 250);
+      if (!compact) ambientTimer = setInterval(() => {
+        ambientStep = (ambientStep + 1) % 3;
+        ambientPose = (['walk', 'sit', 'wave'] as const)[ambientStep];
+        if (ambientPose === 'walk' && !reducedMotion && mascotPose === 'idle') atRight = !atRight;
+      }, 6000);
+    };
+    manageTimers = updateTimers;
+    updateTimers();
+    document.addEventListener('visibilitychange', updateTimers);
 
     if (compact && desktop) {
       tick().then(() => {
@@ -203,7 +226,6 @@
           }
           mascotMachine.transition('talking');
           syncMascot();
-          companionMood = 'Michiyo đang trả lời bạn…';
           if (follow)
             tick().then(() => scroll?.scrollTo(0, scroll.scrollHeight));
         }
@@ -234,6 +256,11 @@
       offSecrets?.();
       observer?.disconnect();
       clearInterval(mascotTimer);
+      clearInterval(ambientTimer);
+      clearTimeout(resizeTimer);
+      document.removeEventListener('visibilitychange', updateTimers);
+      motionQuery.removeEventListener('change', motionChanged);
+      manageTimers = () => {};
     };
   });
 
@@ -250,14 +277,13 @@
     const time = formatTime();
     messages = [
       ...messages,
-      { role: 'user', content: text, time },
-      { role: 'assistant', content: '', time },
+      { role: 'user', content: text, time, animate: true },
+      { role: 'assistant', content: '', time, animate: true },
     ];
     busy = true;
     job = newId();
     mascotMachine.transition('thinking');
     syncMascot();
-    companionMood = 'Michiyo đang suy nghĩ…';
     tick().then(() => scroll?.scrollTo(0, scroll.scrollHeight));
 
     if (!desktop) {
@@ -269,12 +295,10 @@
         busy = false;
         mascotMachine.transition('happy');
         syncMascot();
-        companionMood = 'Michiyo ở đây cùng bạn ✨';
         persist();
         setTimeout(() => {
           mascotMachine.transition('idle');
           syncMascot();
-          companionMood = 'Michiyo đang lắng nghe bạn…';
         }, 2200);
       }, 500);
       return;
@@ -296,20 +320,17 @@
       await persist();
       mascotMachine.transition('happy');
       syncMascot();
-      companionMood = 'Michiyo ở đây cùng bạn ✨';
       setTimeout(() => {
         mascotMachine.transition('idle');
         syncMascot();
-        companionMood = 'Michiyo đang lắng nghe bạn…';
       }, 2200);
     } catch (e) {
       error = String(e);
       input = text;
       messages = messages.slice(0, -2);
       resizeComposer();
-      mascotMachine.transition('idle');
+      mascotMachine.transition('error');
       syncMascot();
-      companionMood = 'Có chút trục trặc, bạn thử lại nhé!';
     } finally {
       busy = false;
       focus();
@@ -331,7 +352,6 @@
     } else {
       localStorage.removeItem('michiyo_messages');
     }
-    companionMood = 'Đã làm mới cuộc trò chuyện rồi bạn nhé! 🌿';
     mascotMachine.transition('happy');
     syncMascot();
     focus();
@@ -344,10 +364,6 @@
     } else {
       await navigator.clipboard.writeText(text).catch(() => {});
     }
-    companionMood = 'Đã sao chép nội dung vào khay nhớ tạm! ✨';
-    setTimeout(() => {
-      if (!busy) companionMood = 'Michiyo đang lắng nghe bạn…';
-    }, 2000);
   }
 
   async function saveAnswer(text: string) {
@@ -405,12 +421,6 @@
       class:user-row={message.role === 'user'}
       class:bot-row={message.role === 'assistant'}
     >
-      {#if message.role === 'assistant'}
-        <div class="avatar bot-avatar" title="Michiyo">
-          <span>🌸</span>
-        </div>
-      {/if}
-
       <div class="bubble-wrap">
         {#if compact && message.role === 'assistant'}
           <div class="response-meta">
@@ -434,9 +444,13 @@
           class="msg-bubble"
           class:user={message.role === 'user'}
           class:streaming={busy && message === messages.at(-1)}
+          class:arriving={!!message.animate && !!message.content && !reducedMotion}
         >
           {#if message.role === 'user'}
             <div class="user-text">{message.content}</div>
+            <div class="avatar user-avatar" title="Bạn">
+              <svg aria-hidden="true" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="12" r="5" fill="#76988c"/><path d="M6.5 26c.7-5 4.1-8 9.5-8s8.8 3 9.5 8" fill="#76988c"/></svg>
+            </div>
           {:else}
             <div class="markdown">
               {@html DOMPurify.sanitize(
@@ -475,17 +489,11 @@
         </div>
       </div>
 
-      {#if message.role === 'user'}
-        <div class="avatar user-avatar" title="Bạn">
-          <span>👤</span>
-        </div>
-      {/if}
     </div>
   {/each}
 
   {#if busy && !messages.at(-1)?.content}
     <div class="msg-row bot-row thinking-row">
-      <div class="avatar bot-avatar">🌸</div>
       <div class="bubble-wrap">
         <div class="msg-bubble thinking-bubble">
           <span class="dot"></span>
@@ -545,10 +553,11 @@
 
 <!-- Companion Dock: Mascot directly above input -->
 {#if !compact}
-  <div class="companion-dock" role="region" aria-label="Bé bot Michiyo">
+  <div class="companion-dock" role="region" aria-label="Bé bot Michiyo" class:reduced={reducedMotion} class:walking={displayedPose === 'walk'} class:walking-left={!atRight} data-pose={displayedPose}>
     <button
       type="button"
       class="companion-touch-zone"
+      style:left={atRight ? 'calc(100% - 88px)' : '0px'}
       title="Nhấp để tương tác cùng Michiyo"
       onclick={handleMascotClick}
       onpointerenter={() => {
@@ -561,20 +570,14 @@
       }}
     >
       <div class="companion-frame">
-        <Companion
-          state={mascotPose}
+        {#if active}<Companion
+          state={displayedPose}
           speed={config.animationSpeed}
-          reduced={config.reducedMotion}
+          reduced={reducedMotion}
           skin={config.skin}
-        />
+        />{/if}
       </div>
     </button>
-    <div class="companion-dialog">
-      <div class="companion-bubble">
-        <span class="companion-speaker">Michiyo</span>
-        <span class="companion-mood">{companionMood}</span>
-      </div>
-    </div>
   </div>
 {/if}
 
@@ -587,7 +590,7 @@
   }}
 >
   <textarea
-    rows={compact ? 1 : 2}
+    rows="1"
     bind:this={composer}
     aria-label={t('Tin nhắn', $locale)}
     bind:value={input}
@@ -598,7 +601,6 @@
       resizeComposer();
       mascotMachine.transition('listening');
       syncMascot();
-      companionMood = 'Michiyo đang lắng nghe…';
       if (desktop && !busy) emit('mascot-state', 'listening');
     }}
     onkeydown={(e) => {
@@ -610,13 +612,6 @@
   ></textarea>
 
   <div class="composer-footer">
-    {#if !compact}
-      <div class="model-badge">
-        <span class="badge-dot"></span>
-        <small>{config.model} · Nhấn Enter để gửi</small>
-      </div>
-    {/if}
-
     <div class="composer-buttons">
       {#if busy}
         <button
@@ -674,6 +669,11 @@
     gap: 16px;
     scrollbar-width: thin;
     scrollbar-color: #cdd9cc transparent;
+  }
+  .msg-bubble.arriving { animation: message-arrive 220ms ease-out both; }
+  @keyframes message-arrive {
+    from { opacity: 0; transform: translateY(8px) scale(.98); }
+    to { opacity: 1; transform: none; }
   }
 
   /* Welcome view */
@@ -733,7 +733,7 @@
   .msg-row {
     display: flex;
     gap: 10px;
-    align-items: flex-end;
+    align-items: flex-start;
     max-width: 86%;
   }
   .msg-row.user-row {
@@ -757,15 +757,11 @@
     user-select: none;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
   }
-  .bot-avatar {
-    background: #eff6ee;
-    border: 1px solid #d2e3d2;
-  }
   .user-avatar {
-    background: #30543e;
-    color: #fff;
-    border: 1px solid #284734;
+    background: #e3f0ed;
+    border: 1px solid #cde2dc;
   }
+  .avatar svg { width: 28px; height: 28px; }
   .bubble-wrap {
     display: flex;
     flex-direction: column;
@@ -787,15 +783,25 @@
     border-radius: 18px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
   }
-  .user-row .msg-bubble {
-    background: #2f533d;
-    color: #f7faf7;
+  .chat-stream-container:not(.compact-stream) .msg-row article.msg-bubble {
+    margin: 0;
+    padding: 12px 17px;
+  }
+  .chat-stream-container:not(.compact-stream) .user-row article.msg-bubble {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 8px 7px 17px;
+    background: #e3f3e8;
+    color: #244433;
+    border: 1px solid #cde7d5;
     border-radius: 18px 18px 4px 18px;
   }
   .user-row .user-text {
     white-space: pre-wrap;
+    min-width: 0;
   }
-  .bot-row .msg-bubble {
+  .chat-stream-container:not(.compact-stream) .bot-row article.msg-bubble {
     background: #ffffff;
     color: #24342a;
     border: 1px solid #e1e7e1;
@@ -878,13 +884,16 @@
 
   /* Companion Dock directly above input - unconstrained & natural */
   .companion-dock {
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-    padding: 0 4px 6px;
+    position: relative;
+    height: 72px;
+    width: 100%;
+    flex: none;
     user-select: none;
   }
   .companion-touch-zone {
+    position: absolute;
+    bottom: -8px;
+    z-index: 1;
     background: transparent;
     border: 0;
     padding: 0;
@@ -892,11 +901,14 @@
     outline: none;
     display: flex;
     align-items: flex-end;
-    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: left 5.5s linear, transform 0.2s ease;
   }
   .companion-touch-zone:hover {
+    background: transparent;
     transform: translateY(-4px) scale(1.06);
   }
+  .companion-dock.reduced .companion-touch-zone { transition: none; }
+  .companion-dock.reduced .companion-touch-zone:hover { transform: none; }
   .companion-frame {
     width: 88px;
     height: 88px;
@@ -912,67 +924,38 @@
     pointer-events: none;
     filter: drop-shadow(0 5px 12px rgba(45, 75, 55, 0.16));
   }
-  .companion-dialog {
-    flex: 1;
-    min-width: 0;
-    margin-bottom: 8px;
+  .companion-frame :global(.sprite) {
+    width: 88px;
+    height: 88px;
   }
-  .companion-bubble {
-    display: inline-flex;
-    flex-direction: column;
-    background: #ffffff;
-    border: 1px solid #dce5dc;
-    border-radius: 12px 14px 14px 4px;
-    padding: 7px 14px;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.03);
-    max-width: 100%;
-    position: relative;
-  }
-  .companion-bubble::before {
-    content: '';
-    position: absolute;
-    left: -5px;
-    bottom: 9px;
-    width: 8px;
-    height: 8px;
-    background: #ffffff;
-    border-left: 1px solid #dce5dc;
-    border-bottom: 1px solid #dce5dc;
-    transform: rotate(45deg);
-  }
-  .companion-speaker {
-    font-size: 11px;
-    font-weight: 700;
-    color: #355841;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-  .companion-mood {
-    font-size: 13px;
-    color: #44594a;
-    margin-top: 2px;
-  }
-
+  .walking .companion-frame { animation: walk-bob .35s steps(2) infinite; }
+  .walking-left .companion-frame :global(.sprite) { transform: scaleX(-1); }
+  @keyframes walk-bob { 50% { transform: translateY(-2px); } }
   /* Chat Composer Form */
   .chat-composer {
     background: #ffffff;
     border: 1px solid #d5dfd5;
     border-radius: 16px;
-    padding: 10px 14px 8px;
+    padding: 8px 8px 8px 16px;
     box-shadow: 0 4px 16px rgba(41, 68, 50, 0.06);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: flex-end;
     gap: 8px;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    margin-top: 0;
+    flex: none;
   }
   .chat-composer:focus-within {
     border-color: #3e6d4e;
     box-shadow: 0 4px 20px rgba(41, 68, 50, 0.11);
   }
   .chat-composer textarea {
+    flex: 1;
     width: 100%;
-    min-height: 52px;
-    max-height: 160px;
+    min-width: 0;
+    min-height: 28px;
+    max-height: 120px;
     resize: none;
     border: 0;
     outline: none;
@@ -996,21 +979,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-top: 4px;
-    border-top: 1px solid #edf2ec;
-  }
-  .model-badge {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #819484;
-    font-size: 11.5px;
-  }
-  .badge-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #479e61;
+    flex: none;
   }
   .composer-buttons {
     display: flex;
@@ -1056,6 +1025,10 @@
   /* Compact mode overrides */
   .compact-composer {
     padding: 8px 10px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .companion-touch-zone { transition: none; }
+    .msg-bubble.arriving { animation: none; }
   }
   .compact-stream {
     padding: 6px;

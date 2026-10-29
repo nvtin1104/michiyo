@@ -35,7 +35,7 @@ export const defaults = {
   chatShortcut: 'Ctrl+Alt+C',
   shellShortcut: 'Ctrl+Alt+Space',
   toggleShortcut: 'Ctrl+Alt+M',
-  skin: 'default',
+  skin: 'reze',
   animationSpeed: 1,
   reducedMotion: false,
   cursorTracking: true,
