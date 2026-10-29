@@ -6,7 +6,7 @@ Bạn là senior full-stack engineer, giỏi Tauri 2 / Rust / Svelte 5 / TypeScr
 
 # Hiện trạng (không phá vỡ)
 
-- Desktop: Tauri 2 + Svelte 5 + PixiJS/Three (mascot 2D/3D), các cửa sổ riêng `mascot`, `chat`, `translate`, `settings`, mở qua `?view=`.
+- Desktop: Tauri 2 + Svelte 5 + PixiJS (mascot 2D), các cửa sổ riêng `mascot`, `chat`, `translate`, `settings`, mở qua `?view=`.
 - Rust: `src-tauri/src/{commands,providers,config,secrets}`; cấu hình `tauri-plugin-store` (`settings.json`), lịch sử `history.json`, khóa trong OS keychain (`keyring`).
 - Claude chạy qua Claude Agent SDK trong Node worker (`agent/`), tool bị tắt hoàn toàn, khóa chỉ đi qua pipe.
 - Dịch: trait `Translator` với MyMemory / LibreTranslate / Google / Claude, có fallback + LRU.

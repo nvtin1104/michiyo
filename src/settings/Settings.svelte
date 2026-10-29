@@ -103,7 +103,7 @@
   let show = false;
   let stored: Record<string, boolean> = {};
   let dirtyTimer: ReturnType<typeof setTimeout>;
-  let skins = ['default', 'reze'];
+  let skins = ['default'];
   let skinDirectory = '';
   onMount(() => {
     if (desktop) {
@@ -564,9 +564,7 @@
               label:
                 value === 'default'
                   ? 'Moon gardener'
-                  : value === 'reze'
-                    ? 'Reze · 3D'
-                    : value,
+                  : value,
             }))}
             onchange={changed}
           /></label
@@ -601,10 +599,6 @@
         <label class="check"
           ><input type="checkbox" bind:checked={config.clickOpensChat} />Click
           mascot để mở chat</label
-        >
-        <label class="check"
-          ><input type="checkbox" bind:checked={config.soundEffects} />Âm thanh
-          khi chọc (Reze)</label
         >
         <p class="muted">
           Giữ trên đầu để vuốt ve; kéo từ ngực trở lên để nhấc bổng, kéo phần

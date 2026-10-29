@@ -75,7 +75,7 @@ try {
   assert.deepEqual(await page.evaluate(() => window.__calls[0]), ['reminders_snooze', { id: 'r1', minutes: 10 }]);
   assert.equal(typeof (await page.evaluate(() => window.__tz)), 'number');
 
-  await page.getByRole('button', { name: '+ Mới' }).click();
+  await page.getByRole('button', { name: '+ Tạo sự kiện' }).click();
   await page.getByLabel('Tiêu đề', { exact: true }).fill('Họp nhóm');
   await page.getByLabel('Nhắc nhở').selectOption('15');
   await page.getByLabel('Lặp lại').selectOption('FREQ=WEEKLY');
@@ -86,7 +86,7 @@ try {
   assert.equal(saved.rrule, 'FREQ=WEEKLY');
   assert.equal(saved.kind, 'event');
 
-  await page.getByRole('button', { name: '+ Mới' }).click();
+  await page.getByRole('button', { name: '+ Tạo sự kiện' }).click();
   await page.getByLabel('Tiêu đề', { exact: true }).fill('Nộp báo cáo');
   await page.getByLabel('Loại').selectOption('todo');
   await page.getByRole('button', { name: 'Lưu', exact: true }).click();

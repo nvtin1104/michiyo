@@ -191,10 +191,10 @@
 
 <header>
   <div>
-    <small>PLAN YOUR DAYS</small>
-    <h1>Lịch <span>✦</span></h1>
+    <small>QUẢN LÝ THỜI GIAN</small>
+    <h1>Lịch</h1>
   </div>
-  <button onclick={() => edit(null)}>+ Mới</button>
+  <button class="primary" onclick={() => edit(null)}>+ Tạo sự kiện</button>
 </header>
 {#if !desktop}<p class="muted">Mở ứng dụng desktop để sử dụng lịch.</p>{/if}
 <div class="bar">
@@ -329,15 +329,17 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    margin: 12px 0;
+    margin: 4px 0 20px;
   }
+  .bar strong { color: #2d4135; font-size: 14px; }
   .views {
     margin-left: auto;
     display: inline-flex;
     gap: 4px;
   }
   .views .active {
-    background: #cdddc9;
+    background: #dce9dd;
+    border-color: #d0dfd2;
     font-weight: 600;
   }
   .form {
@@ -359,36 +361,40 @@
   .grid {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 4px;
+    gap: 5px;
   }
   .grid b {
     text-align: center;
-    color: #667a68;
-    font-size: 12px;
+    color: #819084;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 0;
   }
   .cell {
     min-height: 84px;
-    padding: 4px;
-    background: #f1f4ec;
-    border: 1px solid #dde6d9;
-    border-radius: 8px;
+    padding: 7px;
+    background: #fff;
+    border: 1px solid #e3e9e3;
+    border-radius: 7px;
     overflow: hidden;
   }
   .grid.week .cell {
     min-height: 240px;
   }
   .cell.other {
-    opacity: 0.5;
+    background: #f6f8f5;
+    color: #a2aea4;
   }
   .cell.today {
-    border-color: #3b5642;
-    background: #e3eddc;
+    border-color: #8bab93;
+    background: #eff6ef;
   }
   .num {
     border: 0;
     background: transparent;
     padding: 0 2px;
     font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
   }
   .item {

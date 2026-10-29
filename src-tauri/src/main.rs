@@ -105,12 +105,15 @@ fn main() {
                         }
                     }
                     "main" => {
-                        let _ = commands::open_main(app.clone(), "home".into());
+                        let h = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = commands::open_main(h, "chat".into()).await;
+                        });
                     }
                     "settings" => {
                         let h = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = commands::open_main(h, "settings".into());
+                            let _ = commands::open_main(h, "settings".into()).await;
                         });
                     }
                     "quit" => app.exit(0),

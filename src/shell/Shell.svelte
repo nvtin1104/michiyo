@@ -23,8 +23,20 @@
     ['bot', 'Bot'],
     ['settings', 'Cài đặt'],
   ];
-  let route = 'home';
-  let chatVisited = false;
+  const icons: Record<string, string> = {
+    home: 'M3 10.5 12 3l9 7.5M5 9v11h14V9M9 20v-6h6v6',
+    chat: 'M4 5h16v11H9l-5 4V5Z',
+    translate: 'M4 6h10M9 3v3c0 6-2 9-5 11M6 10c1 3 3 5 6 7M14 20l3-9 3 9M15 17h4',
+    notes: 'M5 3h11l3 3v15H5V3Zm3 7h8M8 14h8M8 18h5',
+    habits: 'M12 3a9 9 0 1 0 9 9M8 12l3 3 9-10',
+    calendar: 'M4 6h16v14H4V6Zm4-3v6M16 3v6M4 10h16',
+    history: 'M4 5v5h5M4.5 10A8 8 0 1 1 4 14M12 7v5l3 2',
+    bot: 'M5 8h14v11H5V8Zm7-5v5M8 12h.01M16 12h.01M9 16h6',
+    settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2',
+  };
+  let route = 'chat';
+  let sidebarOpen = true;
+  let chatVisited = true;
   let translateVisited = false;
   let settingsVisited = false;
   let notesVisited = false;
@@ -144,17 +156,17 @@
     }
   }
   function navigate(next: string) {
-    route = routes.some(([id]) => id === next) ? next : 'home';
+    route = routes.some(([id]) => id === next) ? next : 'chat';
     if (route === 'chat') chatVisited = true;
     if (route === 'translate') translateVisited = true;
     if (route === 'settings') settingsVisited = true;
     if (route === 'notes') notesVisited = true;
     if (route === 'habits') habitsVisited = true;
     if (route === 'calendar') calendarVisited = true;
-    location.hash = `#/${route}`;
+    if (location.hash !== `#/${route}`) location.hash = `#/${route}`;
   }
   onMount(() => {
-    const fromHash = () => navigate(location.hash.slice(2) || 'home');
+    const fromHash = () => navigate(location.hash.slice(2) || 'chat');
     fromHash();
     window.addEventListener('hashchange', fromHash);
     let off: (() => void) | undefined;
@@ -202,19 +214,23 @@
   });
 </script>
 
-<div class="shell">
+<div class="shell" class:sidebar-closed={!sidebarOpen}>
   <aside>
-    <div class="brand">✦ <span>Michiyo</span></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">M</span><span class="brand-copy"><strong>Michiyo</strong><small>Không gian của bạn</small></span></div>
     <nav aria-label="Điều hướng chính">
+      <div class="nav-heading">KHÔNG GIAN LÀM VIỆC</div>
       {#each routes as [id, label]}
         <button
           class:active={route === id}
+          aria-label={label}
+          title={label}
           aria-current={route === id ? 'page' : undefined}
-          onclick={() => navigate(id)}>{label}</button
+          onclick={() => navigate(id)}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d={icons[id]} /></svg><span>{label}</span></button
         >
       {/each}
     </nav>
     <div class="shell-status">
+      <span class="status-title">TRẠNG THÁI</span>
       <span
         >{config.mode === 'offline'
           ? 'Offline'
@@ -225,10 +241,19 @@
           : config.chatProvider === 'openai_compat'
             ? config.openaiModel || 'OpenAI-compatible'
             : config.model}</span
-      ><span>Đồng bộ: {syncText}</span>
+      ><span><i aria-hidden="true"></i> Đồng bộ: {syncText}</span>
     </div>
   </aside>
   <main class="shell-main">
+    <div class="shell-topbar">
+      <button class="sidebar-toggle" aria-label={sidebarOpen ? 'Đóng thanh bên' : 'Mở thanh bên'} aria-expanded={sidebarOpen} onclick={() => (sidebarOpen = !sidebarOpen)} title={sidebarOpen ? 'Đóng thanh bên' : 'Mở thanh bên'}>
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+      </button>
+      <strong>Michiyo</strong>
+      <span class="topbar-spacer"></span>
+      <button class="topbar-link" onclick={() => navigate('home')}>Không gian làm việc</button>
+      <button class="topbar-link" onclick={() => navigate('settings')}>Cài đặt</button>
+    </div>
     {#if due.length}<div class="reminders" role="region" aria-label="Nhắc nhở">
         {#each due as item (item.reminder_id)}
           <div class="reminder">
@@ -309,8 +334,8 @@
     {#if calendarVisited}<div class="shell-page" hidden={route !== 'calendar'}>
         <Calendar />
       </div>{/if}
-    {#if chatVisited}<div class="shell-page" hidden={route !== 'chat'}>
-        <Chat {config} />
+    {#if chatVisited}<div class="shell-page shell-chat" hidden={route !== 'chat'}>
+        <Chat {config} onNavigate={navigate} />
       </div>{/if}
     {#if translateVisited}<div
         class="shell-page"
@@ -329,74 +354,127 @@
 
 <style>
   .shell {
-    min-height: 100vh;
+    height: 100dvh;
     display: grid;
-    grid-template-columns: 210px minmax(0, 1fr);
-    background: #faf9f2;
-    color: #293c31;
+    grid-template-columns: 224px minmax(0, 1fr);
+    overflow: hidden;
+    background: #f7f8f6;
+    color: #26352f;
   }
+  .shell.sidebar-closed { grid-template-columns: 0 minmax(0, 1fr); }
+  .sidebar-closed > aside { visibility: hidden; overflow: hidden; padding: 0; border: 0; }
   aside {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
-    padding: 22px 14px;
-    background: #e9eee3;
-    border-right: 1px solid #d6dfd2;
+    min-height: 0;
+    padding: 22px 12px 14px;
+    background: #f1f4f0;
+    border-right: 1px solid #dfe6df;
   }
   .brand {
-    font-family: Georgia, serif;
-    font-size: 24px;
-    padding: 0 10px 20px;
-    color: #9b7745;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 2px 8px 24px;
   }
-  .brand span {
-    color: #3b5642;
+  .brand-mark {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: #385e4b;
+    color: white;
+    font-size: 18px;
+    font-weight: 700;
   }
+  .brand-copy { display: grid; gap: 2px; min-width: 0; }
+  .brand-copy strong { font-size: 16px; letter-spacing: -.3px; }
+  .brand-copy small { color: #78877d; font-size: 10px; letter-spacing: 0; white-space: nowrap; }
   nav {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    min-height: 0;
+    overflow-y: auto;
+    gap: 2px;
+    scrollbar-width: thin;
+    border: 0;
+    padding: 0;
   }
+  .nav-heading { padding: 0 10px 9px; color: #8a988e; font-size: 9px; font-weight: 700; letter-spacing: .08em; }
   nav button {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-height: 39px;
+    width: 100%;
     text-align: left;
     border: 0;
-    border-radius: 8px;
-    padding: 10px 12px;
+    border-radius: 7px;
+    padding: 9px 10px;
+    margin: 0;
     background: transparent;
-    color: #506456;
+    color: #596c61;
+    font-size: 13px;
     cursor: pointer;
   }
+  nav button svg { width: 18px; height: 18px; flex: none; }
+  nav button span { color: inherit; font-size: inherit; }
+  nav button:hover { background: #e3ebe3; color: #284b37; }
+  nav button:focus-visible { outline: 2px solid #638974; outline-offset: -2px; }
   nav button.active {
-    background: #cdddc9;
-    color: #233d2a;
+    background: #dbe8dc;
+    color: #244a34;
     font-weight: 600;
   }
   .shell-status {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 7px;
     margin-top: auto;
-    padding: 16px 10px 0;
-    color: #667a68;
+    padding: 15px 10px 0;
+    border-top: 1px solid #dce5dd;
+    color: #738278;
     font-size: 11px;
     overflow-wrap: anywhere;
   }
+  .status-title { font-size: 9px; font-weight: 700; letter-spacing: .08em; color: #91a096; }
+  .shell-status i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #86a990; margin-right: 3px; }
   [hidden] {
     display: none !important;
   }
   .shell-main {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
-    min-height: 100vh;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #fafbf9;
   }
+  .shell-topbar { flex: none; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 22px; border-bottom: 1px solid #e6ebe6; background: #fafbf9; }
+  .shell-topbar strong { font-size: 14px; color: #344b3d; }
+  .topbar-spacer { flex: 1; }
+  .shell-topbar button { border: 0; background: transparent; color: #617168; font-size: 12px; padding: 8px 10px; }
+  .shell-topbar button:hover { background: #edf2ed; }
+  .sidebar-toggle { display: grid; place-items: center; }
+  .sidebar-toggle svg { width: 19px; height: 19px; }
   .shell-page {
     display: flex;
     flex-direction: column;
-    height: 100vh;
-    max-width: 1000px;
-    padding: 32px;
+    flex: 1;
+    min-height: 0;
+    height: auto;
+    width: 100%;
+    max-width: 1120px;
+    padding: 36px 40px;
     margin: auto;
     overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #c9d2ca transparent;
   }
+  .shell-page :global(header h1 span) { display: none; }
   .home-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -404,9 +482,9 @@
   }
   .home-grid section {
     padding: 14px;
-    background: #e9eee3;
-    border: 1px solid #d4dfd0;
-    border-radius: 12px;
+    background: #fff;
+    border: 1px solid #e0e7e0;
+    border-radius: 10px;
   }
   .home-grid h2 {
     margin: 0 0 8px;
@@ -446,8 +524,25 @@
     min-width: 0;
   }
   .shell-settings {
-    height: 100vh;
+    flex: 1;
+    min-height: 0;
   }
+  .shell-chat { max-width: 900px; padding: 20px 32px 26px; }
+  .shell-chat :global(.chat-header) { margin-bottom: 14px; padding-bottom: 12px; }
+  .shell-chat :global(.chat-header h1) { font-size: 16px; letter-spacing: 0; margin: 0; }
+  .shell-chat :global(.toolbar) { gap: 8px; }
+  .shell-chat :global(.toolbar select) { max-width: 300px; }
+  .shell-chat :global(.messages) { padding: 0 12px; scrollbar-width: thin; }
+  .shell-chat :global(.welcome) { display: flex; min-height: 100%; flex-direction: column; justify-content: center; align-items: center; padding: 20px 0; }
+  .shell-chat :global(.welcome h2) { font-size: 25px; font-weight: 600; letter-spacing: -.03em; }
+  .shell-chat :global(.welcome p) { margin: 8px 0; }
+  .shell-chat :global(.suggestions) { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); width: min(100%, 620px); margin-top: 24px; }
+  .shell-chat :global(.suggestions button) { background: #fff; border-color: #e3e9e3; font-size: 12px; }
+  .shell-chat :global(.messages article) { max-width: 86%; margin: 18px 0; border: 0; padding: 12px 16px; background: transparent; }
+  .shell-chat :global(.messages article.user) { margin-left: auto; background: #eaf0e9; border-radius: 16px 16px 4px 16px; }
+  .shell-chat :global(form) { flex: none; margin-top: 14px; border-radius: 16px; border-color: #dbe4db; box-shadow: 0 4px 18px #2c443b0b; }
+  .shell-chat :global(form textarea) { min-height: 52px; }
+  .shell-chat :global(.composer-footer) { padding: 0 4px 2px; }
   .cards {
     display: flex;
     flex-wrap: wrap;
@@ -456,20 +551,38 @@
   }
   .cards button {
     padding: 20px;
-    background: #e9eee3;
-    border: 1px solid #d4dfd0;
-    border-radius: 12px;
+    background: #fff;
+    border: 1px solid #dce5dc;
+    border-radius: 10px;
     cursor: pointer;
   }
-  @media (max-width: 640px) {
+  @media (max-width: 760px) {
     .shell {
-      grid-template-columns: 145px minmax(0, 1fr);
+      grid-template-columns: 184px minmax(0, 1fr);
     }
     .shell-page {
-      padding: 18px;
+      padding: 26px 24px;
     }
     aside {
       padding: 15px 8px;
     }
+  }
+  @media (max-width: 560px) {
+    .shell { grid-template-columns: 60px minmax(0, 1fr); }
+    aside { padding: 16px 7px; }
+    .brand { justify-content: center; padding: 0 0 22px; }
+    .brand-copy, .nav-heading, nav button span, .shell-status { display: none; }
+    nav button { justify-content: center; padding: 10px; }
+    .shell-page { padding: 22px 16px; }
+    .shell-chat { padding: 12px 14px 16px; }
+    .shell-topbar { padding: 7px 10px; gap: 3px; }
+    .shell-topbar button { padding: 8px 6px; }
+  }
+  @media (max-height: 560px) {
+    aside { padding-top: 14px; }
+    .brand { padding-bottom: 14px; }
+    .nav-heading { padding-bottom: 5px; }
+    nav button { min-height: 34px; padding-top: 7px; padding-bottom: 7px; }
+    .shell-status { display: none; }
   }
 </style>

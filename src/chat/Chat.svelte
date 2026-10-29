@@ -10,6 +10,7 @@
   import { call, desktop, type Config } from '../lib/api';
   export let config: Config;
   export let compact = false;
+  export let onNavigate: ((route: string) => void) | undefined = undefined;
   let composer: HTMLTextAreaElement;
   const focus = () => tick().then(() => composer?.focus());
   type Message = { role: 'user' | 'assistant'; content: string };
@@ -257,18 +258,16 @@
   }
 </script>
 
-{#if !compact}<header>
+{#if !compact}<header class="chat-header">
     <div>
-      <small>YOUR LITTLE COMPANION</small>
-      <h1>{t('Trò chuyện', $locale)} <span>✦</span></h1>
+      <h1>{t('Trò chuyện', $locale)}</h1>
     </div>
     <button
-      class="icon"
+      type="button"
+      disabled={busy}
       onclick={() =>
-        call(
-          compact ? 'open_panel' : 'open_main',
-          compact ? { label: 'settings' } : { route: 'settings' },
-        )}>⚙</button
+        { current = ''; messages = []; input = ''; error = ''; focus(); }}
+      >+ Cuộc trò chuyện mới</button
     >
   </header>
   <div class="toolbar">
@@ -292,14 +291,8 @@
     bind:this={scroll}
   >
     {#if !messages.length && !compact}<div class="welcome">
-        <div class="star">✧</div>
-        <h2>
-          {t('Một chút giúp đỡ,', $locale)}<br />{t(
-            'một ngày nhẹ hơn.',
-            $locale,
-          )}
-        </h2>
-        <p>{t('Mình là Michiyo. Bạn đang nghĩ gì?', $locale)}</p>
+        <h2>Hôm nay tôi có thể giúp gì?</h2>
+        <p>Hỏi Michiyo về bất cứ điều gì bạn đang làm.</p>
         <div class="suggestions">
           {#each ['Giúp tôi viết một email', 'Giải thích một ý tưởng', 'Lên kế hoạch hôm nay'] as suggestion}<button
               onclick={() => (input = suggestion)}
@@ -364,11 +357,10 @@
     <div class="notice-actions">
       <button
         type="button"
-        onclick={() =>
-          call(
-            compact ? 'open_panel' : 'open_main',
-            compact ? { label: 'settings' } : { route: 'settings' },
-          )}
+        onclick={() => {
+          if (!compact && onNavigate) onNavigate('settings');
+          else call(compact ? 'open_panel' : 'open_main', compact ? { label: 'settings' } : { route: 'settings' });
+        }}
         >{needsKey
           ? $locale === 'en'
             ? 'Add key'

@@ -396,7 +396,7 @@ pub async fn test_connection(
     Ok("Kết nối thành công".into())
 }
 #[tauri::command]
-pub fn open_chat_in_main(
+pub async fn open_chat_in_main(
     app: tauri::AppHandle,
     state: tauri::State<'_, Runtime>,
     draft: Value,
@@ -408,7 +408,7 @@ pub fn open_chat_in_main(
         .pending_shell_chat_draft
         .lock()
         .map_err(|_| "Không mở được cuộc trò chuyện")? = Some(draft);
-    open_main(app, "chat".into())
+    open_main_impl(app, "chat".into())
 }
 
 #[tauri::command]
@@ -417,7 +417,7 @@ pub fn take_shell_chat_draft(state: tauri::State<'_, Runtime>) -> Option<Value> 
 }
 
 #[tauri::command]
-pub fn open_translation_in_main(
+pub async fn open_translation_in_main(
     app: tauri::AppHandle,
     state: tauri::State<'_, Runtime>,
     text: String,
@@ -430,7 +430,7 @@ pub fn open_translation_in_main(
         .pending_translation_draft
         .lock()
         .map_err(|_| "Không mở được bản dịch")? = Some(json!({"text": text, "result": result}));
-    open_main(app, "translate".into())
+    open_main_impl(app, "translate".into())
 }
 
 #[tauri::command]
@@ -439,7 +439,12 @@ pub fn take_translation_draft(state: tauri::State<'_, Runtime>) -> Option<Value>
 }
 
 #[tauri::command]
-pub fn open_main(app: tauri::AppHandle, route: String) -> Result<(), String> {
+pub async fn open_main(app: tauri::AppHandle, route: String) -> Result<(), String> {
+    open_main_impl(app, route)
+}
+
+// WebviewWindowBuilder must run off the Windows event thread.
+pub(crate) fn open_main_impl(app: tauri::AppHandle, route: String) -> Result<(), String> {
     if ![
         "home",
         "chat",
@@ -547,8 +552,8 @@ pub async fn menu_action(app: tauri::AppHandle, action: String) -> Result<(), St
         let _ = menu.hide();
     }
     match action.as_str() {
-        "main" => open_main(app, "home".into()),
-        "chat" | "translate" | "settings" => open_main(app, action),
+        "main" => open_main_impl(app, "chat".into()),
+        "chat" | "translate" | "settings" => open_main_impl(app, action),
         "hide" => {
             if let Some(w) = app.get_webview_window("mascot") {
                 w.hide().map_err(|e| e.to_string())?;
@@ -799,12 +804,15 @@ fn register_shortcuts(
                         });
                     }
                     "main" => {
-                        let _ = open_main(handle.clone(), "home".into());
+                        let h = handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = open_main(h, "chat".into()).await;
+                        });
                     }
                     "chat" => {
                         let h = handle.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = show_panel(&h, "chat", false);
+                            let _ = open_main(h, "chat".into()).await;
                         });
                     }
                     _ => {

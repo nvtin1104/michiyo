@@ -7,58 +7,6 @@
   export let skin = 'default';
   export let pointer = { x: 80, y: 80 };
   export let tracking = true;
-  export let sound = true;
-  let failed = false;
-  let previousSkin = skin;
-  $: if (previousSkin !== skin) {
-    previousSkin = skin;
-    failed = false;
-  }
 </script>
 
-{#if skin === 'reze' && !failed}
-  {#await import('./ModelMascot.svelte')}
-    <div class="loading" role="status">Đang tải Reze…</div>
-  {:then module}
-    <svelte:component
-      this={module.default}
-      {state}
-      {speed}
-      {reduced}
-      {pointer}
-      {tracking}
-      {sound}
-      onfailure={() => (failed = true)}
-    />
-  {:catch}
-    <Mascot {state} {speed} {reduced} {pointer} {tracking} />
-  {/await}
-{:else}
-  <Mascot
-    {state}
-    {speed}
-    {reduced}
-    {pointer}
-    {tracking}
-    skin={failed ? 'default' : skin}
-  />
-  {#if failed}<span
-      class="fallback"
-      role="status"
-      title="Không tải được Reze; đang dùng Moon gardener">!</span
-    >{/if}
-{/if}
-
-<style>
-  .loading {
-    font-size: 11px;
-    text-align: center;
-    padding-top: 60px;
-  }
-  .fallback {
-    position: absolute;
-    bottom: 8px;
-    right: 8px;
-    color: #b66058;
-  }
-</style>
+<Mascot {state} {speed} {reduced} {pointer} {tracking} {skin} />

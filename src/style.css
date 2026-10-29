@@ -1,6 +1,5 @@
-@import url('/fonts.css');
 :root {
-  font-family: 'Segoe UI', sans-serif;
+  font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   color: #34433e;
   background: transparent;
   font-synthesis: none;
@@ -357,11 +356,11 @@ small {
   color: #7a887b;
 }
 h1 {
-  font-family: Georgia, serif;
-  font-size: 29px;
-  font-weight: normal;
-  margin: 8px 0 0;
-  letter-spacing: -1px;
+  font-family: inherit;
+  font-size: 27px;
+  font-weight: 650;
+  margin: 6px 0 0;
+  letter-spacing: -.035em;
 }
 h1 span {
   color: #c59753;
@@ -421,7 +420,7 @@ p {
   color: #bb9555;
 }
 .welcome h2 {
-  font-family: Georgia, serif;
+  font-family: inherit;
   font-size: 27px;
   line-height: 1.4;
 }
@@ -544,7 +543,7 @@ nav button.active {
   color: #365d46;
 }
 .nav-note {
-  font-family: Georgia, serif;
+  font-family: inherit;
   color: #9ba58e;
   font-style: italic;
   font-size: 13px;

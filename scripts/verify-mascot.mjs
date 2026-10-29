@@ -119,7 +119,7 @@ try {
   );
   assert.equal(
     await page.evaluate(
-      () => window.calls.filter((c) => c.command === 'open_panel').length,
+      () => window.calls.filter((c) => c.command === 'open_main').length,
     ),
     0,
   );
@@ -127,8 +127,8 @@ try {
   assert.deepEqual(
     await page.evaluate(() =>
       window.calls
-        .filter((c) => c.command === 'open_panel')
-        .map((c) => c.args.label),
+        .filter((c) => c.command === 'open_main')
+        .map((c) => c.args.route),
     ),
     ['chat'],
   );

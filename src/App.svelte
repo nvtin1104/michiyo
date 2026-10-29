@@ -57,6 +57,8 @@
         ...JSON.parse(localStorage.getItem('preview-config') || '{}'),
       };
     }
+    // Fall back for configurations saved with the removed 3D skin.
+    if (config.skin === 'reze') config.skin = 'default';
     locale.set(config.locale);
   }
   async function save() {
@@ -139,7 +141,7 @@
     tabindex="0"
     aria-label="Mở chat Michiyo"
     onkeydown={(e) => {
-      if (e.key === 'Enter') call('open_panel', { label: 'chat' });
+      if (e.key === 'Enter') call('open_main', { route: 'chat' });
     }}
     onpointerdown={(e) => {
       if (e.button !== 0) return;
@@ -150,8 +152,8 @@
       petting = false;
       const r = e.currentTarget.getBoundingClientRect();
       const y = (e.clientY - r.top) / r.height;
-      headPress = y < (config.skin === 'reze' ? 0.32 : 0.56);
-      chestPress = y < (config.skin === 'reze' ? 0.37 : 0.5);
+      headPress = y < 0.56;
+      chestPress = y < 0.5;
       e.currentTarget.setPointerCapture(e.pointerId);
       if (headPress && config.touchReactions)
         holdTimer = setTimeout(() => {
@@ -195,7 +197,7 @@
       else if (wasPressing && !petting) {
         react('touched');
         if (config.clickOpensChat && desktop)
-          call('open_panel', { label: 'chat' }).catch(
+          call('open_main', { route: 'chat' }).catch(
             (e) => (error = String(e)),
           );
       }
@@ -214,7 +216,6 @@
         state={pose}
         {pointer}
         tracking={config.cursorTracking}
-        sound={config.soundEffects}
         skin={config.skin}
         speed={config.animationSpeed}
         reduced={config.reducedMotion ||

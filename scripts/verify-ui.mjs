@@ -79,6 +79,16 @@ await page
   .getByRole('button', { name: 'Cài đặt' })
   .click();
 await page.getByRole('heading', { name: 'Cài đặt', exact: true }).waitFor();
+await page.goto('http://127.0.0.1:1420/?view=main');
+const draft = page.getByRole('textbox', { name: 'Tin nhắn' });
+await draft.fill('Bản nháp cần giữ');
+assert.equal(await page.evaluate(() => location.hash), '#/chat');
+await page.getByRole('button', { name: 'Đóng thanh bên' }).click();
+assert.equal(await page.getByRole('navigation', { name: 'Điều hướng chính' }).isVisible(), false);
+await page.getByRole('button', { name: 'Mở thanh bên' }).click();
+await page.getByRole('button', { name: 'Không gian làm việc' }).click();
+await page.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Trò chuyện' }).click();
+assert.equal(await draft.inputValue(), 'Bản nháp cần giữ');
 await page.goto('http://127.0.0.1:1420/?view=mascot');
 await page.locator('canvas').waitFor();
 await page.waitForTimeout(600);
