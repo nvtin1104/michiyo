@@ -13,18 +13,21 @@
     }
   ],
   "ai": { "binding": "AI" },
+  "triggers": { "crons": ["*/5 * * * *"] },
   "queues": {
-    "producers": [{ "binding": "IG_QUEUE", "queue": "michiyo-instagram" }],
-    "consumers": [{ "queue": "michiyo-instagram", "max_retries": 10, "dead_letter_queue": "michiyo-instagram-dead" }]
+    "producers": [{ "binding": "TELEGRAM_QUEUE", "queue": "michiyo-telegram" }],
+    "consumers": [{ "queue": "michiyo-telegram", "max_retries": 10, "dead_letter_queue": "michiyo-telegram-dead" }]
   },
   "vars": {
+    "ENVIRONMENT": "production",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
     "AI_GATEWAY_ID": "",
+    "TELEGRAM_ALLOWED_CHAT_IDS": "",
     "DEFAULT_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct",
     "ALLOWED_CHAT_MODELS": "@cf/meta/llama-3.1-8b-instruct,@cf/meta/llama-3.3-70b-instruct-fp8-fast"
   }
   // Secrets (set with `wrangler secret put`): ENCRYPTION_KEY (base64, 32 bytes),
-  // IG_VERIFY_TOKEN and IG_APP_SECRET for webhook intake.
-  // Local development only, in .dev.vars: DEV_ADMIN_TOKEN. Never set it in production.
+  // TELEGRAM_WEBHOOK_SECRET and TELEGRAM_BOT_TOKEN for the Telegram bot.
+  // Local development only: ENVIRONMENT=development and DEV_ADMIN_TOKEN in .dev.vars.
 }

@@ -11,6 +11,8 @@
   let chatScope = true, embedScope = false, dailyLimit: number | undefined;
   let pairingCode = '', pairingExpiry = 0, createdKey = '';
   let busy = false;
+  let botStatuses: { status: string; count: number }[] = [];
+  let botIssues: { update_id: number; status: string; received_at: number; updated_at: number }[] = [];
   let dataType = 'note', dataPage: SyncPage | null = null, dataCursor = '0';
   const date = (value: number | null) => value ? new Date(value).toLocaleString('vi-VN') : 'Chưa hoạt động';
 
@@ -62,6 +64,14 @@
     dataPage = await api<SyncPage>(`admin/sync/records?type=${encodeURIComponent(dataType)}&cursor=${cursor}`);
     dataCursor = cursor;
   }
+  async function loadBot() {
+    const [result, issues] = await Promise.all([api<{ statuses: { status: string; count: number }[] }>('admin/telegram/summary'), api<{ issues: typeof botIssues }>('admin/telegram/issues')]);
+    botStatuses = result.statuses; botIssues = issues.issues;
+  }
+  async function botIssue(id: number, operation: 'retry' | 'resolve') {
+    await api(`admin/telegram/issues/${id}/${operation}`, 'POST');
+    await loadBot();
+  }
   async function exportData() {
     const records: Record<string, unknown>[] = [];
     let cursor = '0', more = true;
@@ -80,12 +90,12 @@
 <svelte:head><title>Michiyo Admin</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
 <div class="layout">
   <aside><div class="brand">🌱 Michiyo <small>admin</small></div><nav aria-label="Quản trị">
-    {#each [['overview', 'Tổng quan'], ['devices', 'Thiết bị'], ['api', 'API'], ['usage', 'Sử dụng'], ['data', 'Dữ liệu']] as [id, label]}
-      <button class:active={section === id} onclick={() => { section = id; error = ''; message = ''; if (id === 'data' && !dataPage) void action(() => loadData()); }}>{label}</button>
+    {#each [['overview', 'Tổng quan'], ['devices', 'Thiết bị'], ['api', 'API'], ['usage', 'Sử dụng'], ['data', 'Dữ liệu'], ['bot', 'Telegram']] as [id, label]}
+      <button class:active={section === id} onclick={() => { section = id; error = ''; message = ''; if (id === 'data' && !dataPage) void action(() => loadData()); if (id === 'bot') void action(loadBot); }}>{label}</button>
     {/each}
   </nav></aside>
   <main>
-    <header><div><span class="eyebrow">MICHIYO CLOUD</span><h1>{section === 'overview' ? 'Tổng quan' : section === 'devices' ? 'Thiết bị' : section === 'api' ? 'Quản lý API' : section === 'data' ? 'Dữ liệu' : 'Sử dụng'}</h1></div><button class="secondary" disabled={busy} onclick={() => action(async () => { await refresh(); if (section === 'data') await loadData(); })}>Làm mới</button></header>
+    <header><div><span class="eyebrow">MICHIYO CLOUD</span><h1>{section === 'overview' ? 'Tổng quan' : section === 'devices' ? 'Thiết bị' : section === 'api' ? 'Quản lý API' : section === 'data' ? 'Dữ liệu' : section === 'bot' ? 'Telegram' : 'Sử dụng'}</h1></div><button class="secondary" disabled={busy} onclick={() => action(async () => { await refresh(); if (section === 'data') await loadData(); if (section === 'bot') await loadBot(); })}>Làm mới</button></header>
     {#if error}<p class="notice error" role="alert">{error}</p>{/if}
     {#if message}<p class="notice" role="status">{message}</p>{/if}
     {#if section === 'overview'}
@@ -113,6 +123,14 @@
         <div class="row" style="margin-top: 16px"><button class="secondary" disabled={busy} onclick={() => action(exportData)}>Xuất JSON</button>{#if dataCursor !== '0'}<button class="secondary" disabled={busy} onclick={() => action(() => loadData())}>Về đầu</button>{/if}{#if dataPage?.more}<button disabled={busy} onclick={() => action(() => loadData(true))}>Trang tiếp</button>{/if}</div>
         {#if dataPage && !dataPage.records.length}<p>Không có dữ liệu.</p>{/if}
         {#each dataPage?.records ?? [] as record}<pre>{JSON.stringify(record, null, 2)}</pre>{/each}
+      </section>
+    {:else if section === 'bot'}
+      <section class="card"><h2>Trạng thái Telegram</h2><p>Chỉ trả lời chat riêng được cấu hình. Trạng thái sending có thể đã gửi nhưng chưa xác nhận; kiểm tra trước khi xử lý lại.</p>
+        {#if !botStatuses.length}<p>Chưa có update.</p>{/if}
+        {#each botStatuses as item}<div class="item"><span>{item.status}</span><strong>{item.count}</strong></div>{/each}
+        <h2>Cần xử lý</h2><p>Có thể thử lại lỗi trước khi gửi. Với lượt gửi chưa xác nhận, kiểm tra trong Telegram rồi đánh dấu đã xem.</p>
+        {#if !botIssues.length}<p>Không có update cần xử lý.</p>{/if}
+        {#each botIssues as issue}<div class="item"><div><strong>Update {issue.update_id} · {issue.status}</strong><p>{date(issue.received_at)}</p></div><div class="row">{#if issue.status === 'failed'}<button disabled={busy} onclick={() => action(() => botIssue(issue.update_id, 'retry'))}>Thử lại</button>{/if}<button class="secondary" disabled={busy} onclick={() => action(() => botIssue(issue.update_id, 'resolve'))}>Đã xem</button></div></div>{/each}
       </section>
     {:else}
       <section class="card"><h2>7 ngày gần đây</h2>{#if !usage.length}<p>Chưa có lượt sử dụng.</p>{/if}{#each usage as u}<div class="item"><div><strong>{u.day} · {u.route}</strong><p>{u.model}</p></div><strong>{u.requests} lượt</strong></div>{/each}</section>

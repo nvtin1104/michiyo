@@ -25,10 +25,10 @@ async function store(env: Env, item: SyncRecord): Promise<boolean> {
     .bind(item.type, r.id, r.updated_at, r.deleted_at, r.device_id, r.rev, data)
     .run();
   if (result.meta.changes) return true;
-  const current = await env.DB.prepare('SELECT updated_at, device_id FROM sync_records WHERE type = ? AND id = ?')
+  const current = await env.DB.prepare('SELECT updated_at, device_id, data FROM sync_records WHERE type = ? AND id = ?')
     .bind(item.type, r.id)
-    .first<{ updated_at: number; device_id: string }>();
-  return current?.updated_at === r.updated_at && current.device_id === r.device_id;
+    .first<{ updated_at: number; device_id: string; data: string }>();
+  return current?.updated_at === r.updated_at && current.device_id === r.device_id && current.data === data;
 }
 
 export async function push(env: Env, body: unknown): Promise<PushResponse> {

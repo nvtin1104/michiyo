@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import type { Env } from '../src/env';
 import { createD1 } from './d1';
+import { deleteAllSyncedData } from '../src/sync';
 
 const ADMIN = { Authorization: 'Bearer dev-admin-token' };
 let env: Env;
@@ -24,7 +25,7 @@ const pushAs = async (auth: Record<string, string>, ...records: unknown[]) => (a
 const pullAs = async (auth: Record<string, string>, cursor = '0') => (await (await call(`/v1/sync/pull?cursor=${cursor}`, { headers: auth })).json()) as any;
 
 beforeEach(() => {
-  env = { DB: createD1(), ENCRYPTION_KEY: '', DEV_ADMIN_TOKEN: 'dev-admin-token', AI: {} as Ai };
+  env = { DB: createD1(), ENCRYPTION_KEY: '', DEV_ADMIN_TOKEN: 'dev-admin-token', ENVIRONMENT: 'development', AI: {} as Ai };
 });
 
 describe('sync', () => {
@@ -60,6 +61,8 @@ describe('sync', () => {
     expect(tieWin.accepted).toHaveLength(1);
     const again = await pushAs(auth, note({ updated_at: 200, device_id: 'C', rev: 3, title: 'C wins' }));
     expect(again.accepted).toHaveLength(1);
+    const changed = await pushAs(auth, note({ updated_at: 200, device_id: 'C', rev: 4, title: 'different' }));
+    expect(changed.rejected).toHaveLength(1);
     const { records, cursor } = await pullAs(auth);
     expect(records).toHaveLength(1);
     expect(records[0].record.title).toBe('C wins');
@@ -93,14 +96,14 @@ describe('sync', () => {
     expect(rest.more).toBe(false);
   });
 
-  it('summarises and wipes synced data for admins only', async () => {
+  it('summarises synced data and does not expose unsafe bulk deletion', async () => {
     const auth = await device();
     await pushAs(auth, note(), note({ id: 'N2', deleted_at: 5, updated_at: 5 }));
     expect((await call('/v1/admin/sync/summary')).status).toBe(401);
     const { summary } = (await (await call('/v1/admin/sync/summary', { headers: ADMIN })).json()) as any;
     expect(summary).toEqual([{ type: 'note', records: 2, tombstones: 1 }]);
-    expect(((await (await call('/v1/admin/sync', { method: 'DELETE', headers: ADMIN })).json()) as any).deleted).toBe(2);
-    expect((await pullAs(auth)).records).toEqual([]);
+    expect((await call('/v1/admin/sync', { method: 'DELETE', headers: ADMIN })).status).toBe(404);
+    expect((await pullAs(auth)).records).toHaveLength(2);
   });
 
   it('lists only live records of an allowed type for admins', async () => {
@@ -131,7 +134,7 @@ describe('sync', () => {
     const auth = await device();
     await pushAs(auth, note());
     const before = await pullAs(auth);
-    await call('/v1/admin/sync', { method: 'DELETE', headers: ADMIN });
+    await deleteAllSyncedData(env);
     await pushAs(auth, note({ id: 'new', updated_at: 200 }));
     const after = await pullAs(auth, before.cursor);
     expect(after.records.map((item: any) => item.record.id)).toEqual(['new']);

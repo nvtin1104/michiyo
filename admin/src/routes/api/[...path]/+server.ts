@@ -3,8 +3,8 @@ import type { RequestHandler } from './$types';
 // Only these routes are exposed through the Pages service binding. The Worker
 // verifies the Access JWT itself; no administrative credential enters the browser.
 const allowed: Record<string, RegExp[]> = {
-  GET: [/^admin\/(devices|api-keys|provider-keys|usage|sync\/(summary|records))$/],
-  POST: [/^pair\/start$/, /^admin\/api-keys$/],
+  GET: [/^admin\/(devices|api-keys|provider-keys|usage|sync\/(summary|records)|telegram\/(summary|issues))$/],
+  POST: [/^pair\/start$/, /^admin\/api-keys$/, /^admin\/telegram\/issues\/\d+\/(retry|resolve)$/],
   PUT: [/^admin\/provider-keys\/(anthropic|openai|openrouter)$/],
   PATCH: [/^admin\/devices\/[a-zA-Z0-9-]+$/],
   DELETE: [/^admin\/(devices|api-keys)\/[a-zA-Z0-9-]+$/, /^admin\/provider-keys\/(anthropic|openai|openrouter)$/],

@@ -171,11 +171,20 @@ pub fn apply_remote(db: &mut Connection, records: &[(String, Value)], kinds: &[&
             continue;
         }
         let deleted_at = object.get("deleted_at").and_then(Value::as_i64);
-        let local: Option<(i64, String)> = tx
-            .query_row(&format!("SELECT updated_at, device_id FROM {table} WHERE id = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?)))
+        let local: Option<(i64, String, i64, Option<i64>, String)> = tx
+            .query_row(&format!("SELECT updated_at, device_id, rev, deleted_at, data FROM {table} WHERE id = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
             .optional()?;
         let queued: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outbox WHERE kind = ?1 AND id = ?2)", params![kind, id], |r| r.get(0))?;
-        let remote_wins = local.as_ref().is_none_or(|(at, dev)| wins((updated_at, device), (*at, dev)));
+        let data: Map<String, Value> = object.iter().filter(|(k, _)| !META.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
+        let data = Value::Object(data);
+        // Once a rejected write is removed from the outbox, the server is authoritative
+        // for an equal timestamp/device tuple. Otherwise a same-millisecond edit can
+        // survive locally after its conflict copy was created and never converge.
+        let remote_wins = local.as_ref().is_none_or(|(at, dev, local_rev, local_deleted, local_data)| {
+            wins((updated_at, device), (*at, dev)) ||
+                (!queued && updated_at == *at && device == dev &&
+                    (rev != *local_rev || deleted_at != *local_deleted || serde_json::from_str::<Value>(local_data).ok().as_ref() != Some(&data)))
+        });
         if !remote_wins {
             continue;
         }
@@ -185,8 +194,6 @@ pub fn apply_remote(db: &mut Connection, records: &[(String, Value)], kinds: &[&
             }
             tx.execute("DELETE FROM outbox WHERE kind = ?1 AND id = ?2", params![kind, id])?;
         }
-        let data: Map<String, Value> = object.iter().filter(|(k, _)| !META.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
-        let data = Value::Object(data);
         tx.execute(
             &format!("INSERT INTO {table} (id, updated_at, deleted_at, device_id, rev, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at, deleted_at=excluded.deleted_at, device_id=excluded.device_id, rev=excluded.rev, data=excluded.data"),
             params![id, updated_at, deleted_at, device, rev, data.to_string()],
@@ -372,6 +379,23 @@ mod tests {
         assert!(!queued.contains(&local.id) && queued.len() == 1);
         // Replaying the same record changes nothing.
         assert_eq!(apply_remote(&mut a, &[remote(i64::MAX / 2, "mới")], &["note"])?.applied, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn rejected_same_timestamp_edit_converges_to_server_and_keeps_copy() -> DbResult<()> {
+        let mut db = device();
+        let original = add_note(&mut db, "Ghi chú", "trên server");
+        let server_record = serde_json::to_value(&original)?;
+        let edited = edit_note(&mut db, &original, "bản sửa") ;
+        db.execute("UPDATE notes SET updated_at = ?1 WHERE id = ?2", params![original.updated_at, original.id])?;
+        handle_rejected(&mut db, &[Ref { kind: "note".into(), id: original.id.clone(), rev: edited.rev }])?;
+        let remote = vec![("note".to_string(), server_record)];
+        assert_eq!(apply_remote(&mut db, &remote, &["note"])?.applied, 1);
+        let notes = notes::list(&db, "")?;
+        assert_eq!(notes.iter().find(|n| n.id == original.id).unwrap().body, "trên server");
+        assert!(notes.iter().any(|n| n.title.ends_with("(xung đột)") && n.body == "bản sửa"));
+        assert_eq!(apply_remote(&mut db, &remote, &["note"])?.applied, 0);
         Ok(())
     }
 

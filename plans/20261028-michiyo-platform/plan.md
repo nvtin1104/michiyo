@@ -13,7 +13,7 @@ Ngày: 2026-10-28 · Prompt thực thi: `docs/PLATFORM_PROMPT.md`
 | P4 | Backend Cloudflare: Worker API, D1, auth thiết bị, AI proxy | P0 | P1, P2, P3 |
 | P5 | Đồng bộ online/offline | P2, P4 | P6 |
 | P6 | Web admin + quản lý API | P4 | P5 |
-| P7 | Bot Instagram: webhook, flow engine, flow builder | P4, P6 | — |
+| P7 | Bot Telegram: webhook, flow engine, flow builder | P4, P6 | Đang thực hiện |
 | P8 | Hoàn thiện: test E2E, CI/deploy, tài liệu | tất cả | — |
 
 Đường găng: P0 → P4 → P6 → P7. Desktop (P1–P3) và cloud (P4) có thể giao cho hai luồng làm việc riêng sau P0.
@@ -113,33 +113,24 @@ Ngày: 2026-10-28 · Prompt thực thi: `docs/PLATFORM_PROMPT.md`
   - **API**: khóa provider (thêm/thay/xóa, kiểm tra kết nối, không hiển thị lại giá trị); khóa Michiyo (tạo — chỉ hiện một lần, scope, hạn mức, thu hồi); model mặc định cho từng tác vụ; liên kết log AI Gateway.
   - **Sử dụng**: biểu đồ theo ngày / model / thiết bị / khóa.
   - **Dữ liệu**: xem ghi chú/thói quen/lịch đã đồng bộ (chỉ đọc), xuất JSON, xóa toàn bộ.
-  - **Bot**: tài khoản Instagram, flow, hội thoại, kiến thức (P7).
+  - **Bot**: Telegram, flow, hội thoại, kiến thức (P7).
 - Playwright cho luồng tạo khóa và ghép nối.
 
 **Xong khi:** deploy Pages sau Cloudflare Access; mọi thao tác trên đều qua Worker có kiểm tra auth.
 
-## P7 — Bot Instagram
+## P7 — Bot Telegram
 
-- **Kết nối**: OAuth Instagram Login từ admin → đổi long-lived token → lưu mã hóa, tự refresh trước khi hết hạn (Cron).
-- **Webhook** `GET/POST /v1/ig/webhook`: verify token, kiểm `X-Hub-Signature-256`, đẩy vào Queue, trả 200 ngay.
-- **Flow engine** (`cloud/src/flows/`), định nghĩa trong `shared/flow.ts`:
-  - Trigger: `dm_received`, `comment_created`, `story_mention`, `schedule`.
-  - Điều kiện: từ khóa/regex, giờ làm việc, tag người dùng, lần đầu nhắn, có trong cửa sổ 24 giờ.
-  - Hành động: `reply_text`, `reply_ai` (Workers AI + Vectorize, system prompt theo bot), `private_reply`, `send_quick_replies`, `tag_user`, `handoff`, `notify_desktop`, `wait` (Workflows), `publish_post`.
-  - Trạng thái hội thoại trong Durable Object theo `ig_user_id` (khóa tuần tự, chống trả lời trùng); idempotent theo `mid`.
-  - Bảo vệ: kiểm cửa sổ 24 giờ trước khi gửi, mỗi comment chỉ một private reply, rate limit theo tài khoản, từ khóa dừng, handoff tắt bot cho hội thoại đó.
-- **Flow builder** trong admin: danh sách node dọc (trigger → điều kiện → hành động), kiểm tra hợp lệ bằng zod, bật/tắt, chế độ thử với payload mẫu, lịch sử chạy (`flow_runs`).
-- **Kiến thức**: tải FAQ/tài liệu → chia đoạn → embed → Vectorize; R2 giữ file gốc.
-- **Flow mẫu**: trả lời DM bằng AI + FAQ; comment từ khóa → private reply + DM; story mention cảm ơn; ngoài giờ; lên lịch đăng bài; chuyển người thật + báo desktop.
-- **Desktop**: route `#/bot` xem hội thoại, nhận thông báo handoff, trả lời tay (đi qua Worker).
-- Test: payload webhook mẫu + chữ ký giả, engine chạy từng flow mẫu với Graph API mock.
+- Kết nối Bot API bằng token được bảo vệ; đăng ký webhook với `secret_token`, kiểm tra header và giới hạn payload.
+- Xử lý update qua Queue, khử trùng lặp theo `update_id`; giữ dữ liệu tối thiểu, có thời hạn lưu và quy trình xử lý dead-letter.
+- Xây dựng flow engine và giao diện quản trị cho tin nhắn Telegram, điều kiện, phản hồi văn bản/AI và chuyển người xử lý; bảo vệ quyền truy cập và giới hạn gửi tin.
+- Kiểm thử với Bot API giả lập và bot thử nghiệm thật trước khi đưa vào production.
 
-**Xong khi:** với tài khoản tester ở chế độ Development, cả 6 flow mẫu chạy đúng; không gửi tin ngoài cửa sổ 24 giờ.
+**Trạng thái:** webhook, queue, thời hạn lưu, phản hồi `/start` và AI cho chat riêng trong danh sách cho phép đã được triển khai; admin xem số update theo trạng thái. Flow builder, kiến thức, xử lý dead-letter và kiểm thử Telegram thật còn thiếu. Trạng thái `sending` có thể là kết quả chưa xác định và không được tự động gửi lại.
 
 ## P8 — Hoàn thiện
 
 - CI: job cho `shared`/`cloud`/`admin` (typecheck, vitest, build); job desktop giữ như cũ; deploy `wrangler` + Pages chỉ qua `workflow_dispatch`.
-- Tài liệu: README (kiến trúc mới, chế độ, cách tự host phần cloud), `docs/cloud-setup.md` (tạo D1/KV/R2/Vectorize/AI Gateway, secrets, Access), `docs/instagram-setup.md` (tạo Meta app, quyền, webhook, App Review).
+- Tài liệu: README, `docs/cloud-setup.md` và hướng dẫn thiết lập bot Telegram.
 - Kiểm tra bảo mật: khóa không lọt vào log/URL/UI, CSP desktop thêm đúng host Worker, rate limit endpoint công khai.
 - Kiểm hiệu năng: RAM idle desktop vẫn < 80 MB khi app shell đóng; scheduler nhắc nhở không làm CPU idle tăng.
 

@@ -41,6 +41,7 @@ beforeEach(() => {
     DB: createD1(),
     ENCRYPTION_KEY: key,
     DEV_ADMIN_TOKEN: 'dev-admin-token',
+    ENVIRONMENT: 'development',
     ALLOWED_CHAT_MODELS: '@cf/meta/llama-3.1-8b-instruct',
     AI: {
       run: async (model: string, input: any, options: any) => {
@@ -53,6 +54,12 @@ beforeEach(() => {
 });
 
 describe('pairing and device auth', () => {
+  it('never accepts a dev token without explicit development mode', async () => {
+    env.ENVIRONMENT = 'production';
+    expect((await post('/v1/pair/start', {}, ADMIN)).status).toBe(401);
+    env.ENVIRONMENT = undefined;
+    expect((await post('/v1/pair/start', {}, ADMIN)).status).toBe(401);
+  });
   it('requires admin to start pairing', async () => {
     expect((await post('/v1/pair/start', {})).status).toBe(401);
     expect((await post('/v1/pair/start', {}, { Authorization: 'Bearer wrong' })).status).toBe(401);
@@ -156,6 +163,27 @@ describe('Michiyo API keys', () => {
     const res = await post('/v1/admin/api-keys', body, ADMIN);
     return { res, json: (await res.json()) as any };
   }
+
+  it('reserves quota before concurrent AI calls and counts upstream failures', async () => {
+    const { json } = await createKey({ name: 'limited', scopes: ['ai:chat'], daily_limit: 2 });
+    const auth = { Authorization: `Bearer ${json.key}` };
+    const messages = [{ role: 'user', content: 'hi' }];
+    env.AI = { run: async () => { throw new Error('failed'); } } as unknown as Ai;
+    const replies = await Promise.all(Array.from({ length: 5 }, () => post('/v1/ai/chat', { messages, stream: false }, auth)));
+    expect(replies.map((r) => r.status).sort()).toEqual([429, 429, 429, 502, 502]);
+    const row = await env.DB.prepare('SELECT COUNT(*) AS count FROM usage WHERE key_id = ?').bind(json.id).first<{ count: number }>();
+    expect(row?.count).toBe(2);
+  });
+
+  it('does not count invalid input but counts an unread stream', async () => {
+    const { json } = await createKey({ name: 'stream', scopes: ['ai:chat'], daily_limit: 1 });
+    const auth = { Authorization: `Bearer ${json.key}` };
+    expect((await post('/v1/ai/chat', { messages: [] }, auth)).status).toBe(400);
+    const stream = await post('/v1/ai/chat', { messages: [{ role: 'user', content: 'hi' }] }, auth);
+    expect(stream.status).toBe(200);
+    await stream.body?.cancel();
+    expect((await post('/v1/ai/chat', { messages: [{ role: 'user', content: 'again' }] }, auth)).status).toBe(429);
+  });
 
   it('shows the secret once, enforces scopes, quota and revocation', async () => {
     const { json } = await createKey({ name: 'bot', scopes: ['ai:chat'], daily_limit: 2 });

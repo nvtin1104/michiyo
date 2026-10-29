@@ -8,12 +8,15 @@ export interface Env {
   ACCESS_AUD?: string;
   /** Local development only; never set in production. */
   DEV_ADMIN_TOKEN?: string;
+  ENVIRONMENT?: string;
   AI_GATEWAY_ID?: string;
   DEFAULT_CHAT_MODEL?: string;
   ALLOWED_CHAT_MODELS?: string;
-  IG_VERIFY_TOKEN?: string;
-  IG_APP_SECRET?: string;
-  IG_QUEUE?: Queue<{ payload: string; receivedAt: number }>;
+  TELEGRAM_WEBHOOK_SECRET?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  /** Comma-separated Telegram private chat IDs, never empty in an enabled bot. */
+  TELEGRAM_ALLOWED_CHAT_IDS?: string;
+  TELEGRAM_QUEUE?: Queue<{ updateId: number; payload: string; receivedAt: number }>;
 }
 
 export const DEFAULT_MODEL = '@cf/meta/llama-3.1-8b-instruct';

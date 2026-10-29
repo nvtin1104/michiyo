@@ -3,8 +3,8 @@ import { verifyAccessJwt } from './access';
 import { decrypt, encrypt, normalizeCode, pairingCode, randomToken, sha256Hex } from './crypto';
 import { allowedModels, DEFAULT_MODEL, EMBED_MODEL, type Env } from './env';
 import { toOpenAiStream } from './stream';
-import { deleteAllSyncedData, pull, push, SyncError } from './sync';
-import { receiveWebhook, verifySubscription } from './instagram';
+import { pull, push, SyncError } from './sync';
+import { receiveWebhook } from './telegram';
 
 type Principal = { kind: 'device'; id: string } | { kind: 'key'; id: string; scopes: string[]; dailyLimit: number | null };
 type Vars = { principal: Principal; admin: string };
@@ -20,7 +20,7 @@ const fail = (c: Ctx, status: 400 | 401 | 403 | 404 | 429 | 502, error: string) 
 
 /** Run after the response is sent; falls back to a detached promise outside a Worker (tests). */
 function defer(c: Ctx, work: Promise<unknown>): void {
-  const safe = work.catch(() => {});
+  const safe = work.catch(() => { console.error('background_operation_failed'); });
   try {
     c.executionCtx.waitUntil(safe);
   } catch {
@@ -58,7 +58,7 @@ async function requireAdmin(c: Ctx, next: () => Promise<void>) {
     }
   }
   const token = bearer(c);
-  if (token && env.DEV_ADMIN_TOKEN && (await sha256Hex(token)) === (await sha256Hex(env.DEV_ADMIN_TOKEN))) {
+  if (token && env.ENVIRONMENT === 'development' && env.DEV_ADMIN_TOKEN && (await sha256Hex(token)) === (await sha256Hex(env.DEV_ADMIN_TOKEN))) {
     c.set('admin', 'dev');
     return next();
   }
@@ -93,30 +93,37 @@ function requireScope(scope: string) {
     if (!principal) return fail(c, 401, 'unauthorized');
     if (principal.kind === 'key') {
       if (!principal.scopes.includes(scope)) return fail(c, 403, 'forbidden');
-      if (principal.dailyLimit !== null) {
-        const row = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM usage WHERE key_id = ? AND at >= ?')
-          .bind(principal.id, Date.now() - DAY_MS)
-          .first<{ n: number }>();
-        if ((row?.n ?? 0) >= principal.dailyLimit) return fail(c, 429, 'daily_limit_reached');
-      }
+
     }
     c.set('principal', principal);
     return next();
   };
 }
 
-function recordUsage(c: Ctx, route: string, model: string, inputChars: number, outputChars: number) {
+// Reserve a request before invoking AI. Every admitted attempt counts, including
+// upstream failure or a cancelled stream; validation failures do not count.
+async function reserveUsage(c: Ctx, route: string, model: string, inputChars: number): Promise<number | null> {
   const p = c.get('principal');
-  return c.env.DB.prepare('INSERT INTO usage (at, device_id, key_id, route, model, input_chars, output_chars) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(Date.now(), p.kind === 'device' ? p.id : null, p.kind === 'key' ? p.id : null, route, model, inputChars, outputChars)
-    .run();
+  const now = Date.now();
+  const keyId = p.kind === 'key' ? p.id : null;
+  const limit = p.kind === 'key' ? p.dailyLimit : null;
+  const row = await c.env.DB.prepare(
+    `INSERT INTO usage (at, device_id, key_id, route, model, input_chars, output_chars)
+     SELECT ?, ?, ?, ?, ?, ?, 0 WHERE ? IS NULL OR
+       (SELECT COUNT(*) FROM usage WHERE key_id = ? AND at >= ?) < ? RETURNING id`,
+  ).bind(now, p.kind === 'device' ? p.id : null, keyId, route, model, inputChars, limit, keyId, now - DAY_MS, limit)
+    .first<{ id: number }>();
+  return row?.id ?? null;
+}
+
+function finishUsage(c: Ctx, id: number, outputChars: number) {
+  return c.env.DB.prepare('UPDATE usage SET output_chars = ? WHERE id = ?').bind(outputChars, id).run();
 }
 
 // ---- pairing ----------------------------------------------------------------------------------
 
 app.get('/v1/health', (c) => c.json({ ok: true }));
-app.get('/v1/ig/webhook', (c) => verifySubscription(new URL(c.req.url), c.env));
-app.post('/v1/ig/webhook', (c) => receiveWebhook(c.req.raw, c.env));
+app.post('/v1/telegram/webhook', (c) => receiveWebhook(c.req.raw, c.env));
 
 app.post('/v1/pair/start', requireAdmin, async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -205,15 +212,17 @@ async function chat(c: Ctx) {
   const all = [...system, ...messages];
   const inputChars = all.reduce((n, m) => n + m.content.length, 0);
   const input = { messages: all, max_tokens: maxTokens };
+  const usageId = await reserveUsage(c, 'chat', model, inputChars);
+  if (usageId === null) return fail(c, 429, 'daily_limit_reached');
   try {
     if (body.stream === false) {
       const result = (await c.env.AI.run(model as keyof AiModels, { ...input, stream: false } as never, gateway(c.env))) as { response?: string };
       const text = result.response ?? '';
-      defer(c, recordUsage(c, 'chat', model, inputChars, text.length));
+      defer(c, finishUsage(c, usageId, text.length));
       return c.json({ object: 'chat.completion', model, choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }] });
     }
     const source = (await c.env.AI.run(model as keyof AiModels, { ...input, stream: true } as never, gateway(c.env))) as unknown as ReadableStream<Uint8Array>;
-    const stream = toOpenAiStream(source, model, (chars) => defer(c, recordUsage(c, 'chat', model, inputChars, chars)));
+    const stream = toOpenAiStream(source, model, (chars) => defer(c, finishUsage(c, usageId, chars)));
     return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' } });
   } catch {
     return fail(c, 502, 'upstream_error');
@@ -230,9 +239,10 @@ app.post('/v1/ai/embed', requireScope('ai:embed'), async (c) => {
   const texts = typeof input === 'string' ? [input] : input;
   if (!Array.isArray(texts) || texts.length === 0 || texts.length > 100 || texts.some((t) => typeof t !== 'string' || !t || t.length > 8000))
     return fail(c, 400, 'invalid_input');
+  const usageId = await reserveUsage(c, 'embed', EMBED_MODEL, texts.reduce((n: number, t: string) => n + t.length, 0));
+  if (usageId === null) return fail(c, 429, 'daily_limit_reached');
   try {
     const result = (await c.env.AI.run(EMBED_MODEL as keyof AiModels, { text: texts } as never, gateway(c.env))) as { data?: number[][] };
-    defer(c, recordUsage(c, 'embed', EMBED_MODEL, texts.reduce((n: number, t: string) => n + t.length, 0), 0));
     return c.json({ model: EMBED_MODEL, data: (result.data ?? []).map((embedding, index) => ({ index, embedding })) });
   } catch {
     return fail(c, 502, 'upstream_error');
@@ -319,7 +329,37 @@ admin.get('/usage', async (c) => {
   return c.json({ usage: results });
 });
 
-// Read-only counts and a full wipe, for the admin "Dữ liệu" page.
+admin.get('/telegram/summary', async (c) => {
+  const { results } = await c.env.DB.prepare('SELECT status, COUNT(*) AS count FROM telegram_webhook_inbox GROUP BY status').all();
+  return c.json({ statuses: results });
+});
+
+admin.get('/telegram/issues', async (c) => {
+  const { results } = await c.env.DB.prepare(`SELECT update_id, status, received_at, updated_at FROM telegram_webhook_inbox
+    WHERE status = 'failed' OR (status = 'sending' AND updated_at < ?) ORDER BY updated_at DESC LIMIT 100`)
+    .bind(Date.now() - 60_000).all();
+  c.header('Cache-Control', 'no-store');
+  return c.json({ issues: results });
+});
+
+admin.post('/telegram/issues/:id/retry', async (c) => {
+  const id = c.req.param('id');
+  if (!/^(0|[1-9]\d*)$/.test(id) || !Number.isSafeInteger(Number(id))) return fail(c, 400, 'invalid_update');
+  const row = await c.env.DB.prepare("UPDATE telegram_webhook_inbox SET status = 'received', updated_at = ? WHERE update_id = ? AND status = 'failed' RETURNING update_id")
+    .bind(Date.now(), Number(id)).first();
+  return row ? c.json({ ok: true }) : fail(c, 404, 'not_found');
+});
+
+admin.post('/telegram/issues/:id/resolve', async (c) => {
+  const id = c.req.param('id');
+  if (!/^(0|[1-9]\d*)$/.test(id) || !Number.isSafeInteger(Number(id))) return fail(c, 400, 'invalid_update');
+  const now = Date.now();
+  const row = await c.env.DB.prepare("UPDATE telegram_webhook_inbox SET status = 'resolved', updated_at = ? WHERE update_id = ? AND (status = 'failed' OR (status = 'sending' AND updated_at < ?)) RETURNING update_id")
+    .bind(now, Number(id), now - 60_000).first();
+  return row ? c.json({ ok: true }) : fail(c, 404, 'not_found');
+});
+
+// Read-only counts for the admin "Dữ liệu" page.
 admin.get('/sync/summary', async (c) => {
   const { results } = await c.env.DB.prepare('SELECT type, COUNT(*) AS records, SUM(deleted_at IS NOT NULL) AS tombstones FROM sync_records GROUP BY type ORDER BY type').all();
   return c.json({ summary: results });
@@ -336,7 +376,6 @@ admin.get('/sync/records', async (c) => {
   c.header('Cache-Control', 'no-store');
   return c.json({ records: page.map((row) => JSON.parse(row.data)), cursor: String(page.at(-1)?.server_seq ?? Number(raw)), more: results.length > 100 });
 });
-admin.delete('/sync', async (c) => c.json({ deleted: await deleteAllSyncedData(c.env) }));
 
 app.route('/v1/admin', admin);
 
