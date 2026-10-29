@@ -69,7 +69,7 @@ try {
   await page.getByLabel('Tiêu đề', { exact: true }).fill('Bản nháp');
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Dịch', exact: true })
+    .getByRole('button', { name: 'Thói quen', exact: true })
     .click();
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })

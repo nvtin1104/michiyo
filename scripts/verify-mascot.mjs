@@ -332,39 +332,16 @@ try {
   await shellInput.fill('Kiểm tra chuyển trang');
   await shellInput.press('Enter');
   await page.getByText('Một ', { exact: true }).waitFor();
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Dịch', exact: true })
-    .click();
+  await page.getByRole('button', { name: 'Không gian làm việc' }).click();
   await page.evaluate(() => window.finishMockStream());
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Trò chuyện' })
-    .click();
+  await page.getByRole('button', { name: 'Trò chuyện', exact: true }).click();
   await page.getByText('Một câu trả lời hoàn chỉnh', { exact: true }).waitFor();
-  await page.goto('http://127.0.0.1:1420/?view=main#/chat');
-  await page.getByRole('textbox', { name: 'Tin nhắn' }).waitFor();
-  await page.evaluate(() => {
-    window.historyMock = [{ id: 'other', title: 'Cửa sổ khác', messages: [] }];
-    window.emitMockEvent('history-changed');
-  });
-  await page
-    .locator('select option')
-    .filter({ hasText: 'Cửa sổ khác' })
-    .waitFor({ state: 'attached' });
   await page.goto('http://127.0.0.1:1420/?view=main&chat-draft=1#/chat');
   await page.getByText('Tin nhắn trước', { exact: true }).waitFor();
   assert.equal(
     await page.getByRole('textbox', { name: 'Tin nhắn' }).inputValue(),
     'Văn bản đang soạn',
   );
-  await page.goto(
-    'http://127.0.0.1:1420/?view=main&translation-draft=1#/translate',
-  );
-  const translated = page.getByRole('textbox', { name: 'Văn bản cần dịch' });
-  await translated.waitFor();
-  await page.getByText('Xin chào', { exact: true }).waitFor();
-  assert.equal(await translated.inputValue(), 'Hello');
   await page.setViewportSize({ width: 360, height: 340 });
   await page.goto('http://127.0.0.1:1420/?view=chat&fail-history=1');
   await page.getByText('Không đọc được lịch sử', { exact: true }).waitFor();

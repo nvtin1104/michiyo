@@ -73,7 +73,7 @@
   async function refresh() {
     if (!desktop) return;
     try {
-      habits = await call<Habit[]>('habits_list', { today: localDate() });
+      habits = (await call<Habit[]>('habits_list', { today: localDate() })) || [];
     } catch (e) {
       error = String(e);
     }

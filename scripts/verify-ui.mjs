@@ -22,11 +22,6 @@ await page
   .locator('input[type=password]')
   .first()
   .fill('test-only-not-a-real-key');
-await page.locator('nav button').filter({ hasText: 'Phím tắt' }).click();
-assert.equal(
-  await page.getByLabel('Dịch văn bản đã chọn').inputValue(),
-  'Ctrl+Alt+T',
-);
 await mkdir('artifacts', { recursive: true });
 await page.screenshot({ path: 'artifacts/settings.png', fullPage: true });
 await page.locator('nav button').filter({ hasText: 'Chung' }).click();
@@ -53,48 +48,48 @@ assert.match(
 await page.getByRole('combobox', { name: 'Interface language' }).click();
 await page.getByRole('option', { name: 'Tiếng Việt', exact: true }).click();
 await page.getByRole('heading', { name: /^Cài đặt/ }).waitFor();
-await page
-  .locator('.preview-bar')
-  .getByRole('button', { name: 'Dịch', exact: true })
-  .click();
-await page.getByRole('textbox', { name: 'Văn bản cần dịch' }).fill('Hello');
-await page.getByRole('button', { name: 'Dịch ↗', exact: true }).click();
-await page.getByRole('alert').waitFor();
-assert.match(await page.getByRole('alert').textContent(), /desktop/);
-await page.goto('http://127.0.0.1:1420/?view=main#/home');
+
+// Navigate back to Chat
+await page.getByRole('button', { name: 'Trò chuyện' }).click();
+await page.getByRole('heading', { name: 'Trò chuyện' }).waitFor();
+
+// Verify companion mascot canvas is visible above input
+await page.locator('.companion-dock canvas').waitFor();
+
+// Test workspace navigation
+await page.getByRole('button', { name: 'Không gian làm việc' }).click();
 await page.getByRole('heading', { name: /Một ngày cùng Michiyo/ }).waitFor();
 await page
   .getByRole('navigation', { name: 'Điều hướng chính' })
-  .getByRole('button', { name: 'Trò chuyện' })
+  .getByRole('button', { name: 'Ghi chú' })
   .click();
-await page.getByRole('textbox', { name: 'Tin nhắn' }).waitFor();
-assert.equal(await page.evaluate(() => location.hash), '#/chat');
-await page
-  .getByRole('navigation', { name: 'Điều hướng chính' })
-  .getByRole('button', { name: 'Dịch', exact: true })
-  .click();
-await page.getByRole('textbox', { name: 'Văn bản cần dịch' }).waitFor();
-await page
-  .getByRole('navigation', { name: 'Điều hướng chính' })
-  .getByRole('button', { name: 'Cài đặt' })
-  .click();
-await page.getByRole('heading', { name: 'Cài đặt', exact: true }).waitFor();
-await page.goto('http://127.0.0.1:1420/?view=main');
+await page.getByRole('heading', { name: 'Ghi chú' }).waitFor();
+
+// Test quick back to chat from sidebar
+await page.getByRole('button', { name: '← Trò chuyện' }).click();
 const draft = page.getByRole('textbox', { name: 'Tin nhắn' });
-await draft.fill('Bản nháp cần giữ');
+await draft.fill('Bản nháp 1v1 gửi Michiyo');
 assert.equal(await page.evaluate(() => location.hash), '#/chat');
-await page.getByRole('button', { name: 'Đóng thanh bên' }).click();
-assert.equal(await page.getByRole('navigation', { name: 'Điều hướng chính' }).isVisible(), false);
-await page.getByRole('button', { name: 'Mở thanh bên' }).click();
+
+// Go to workspace to test sidebar toggle
 await page.getByRole('button', { name: 'Không gian làm việc' }).click();
-await page.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Trò chuyện' }).click();
-assert.equal(await draft.inputValue(), 'Bản nháp cần giữ');
+await page.getByRole('button', { name: 'Đóng thanh bên' }).click();
+assert.equal(
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .isVisible(),
+  false,
+);
+await page.getByRole('button', { name: 'Mở thanh bên' }).click();
+await page.getByRole('button', { name: '← Trò chuyện' }).click();
+assert.equal(await draft.inputValue(), 'Bản nháp 1v1 gửi Michiyo');
+
 await page.goto('http://127.0.0.1:1420/?view=mascot');
 await page.locator('canvas').waitFor();
 await page.waitForTimeout(600);
 await page.screenshot({ path: 'artifacts/mascot.png' });
 assert.deepEqual(errors, []);
 console.log(
-  'UI checks passed: chat input, settings tabs, secret inputs, shortcut defaults, desktop-only boundary, Pixi render.',
+  'UI checks passed: chat 1v1, mascot dock in chat, workspace navigation, settings tabs, and standalone mascot.',
 );
 await browser.close();

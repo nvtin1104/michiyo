@@ -7,9 +7,9 @@
     { action: 'main', label: 'Mở Michiyo', icon: 'M2 7l6-5 6 5v7H2V7Z' },
     { action: 'chat', label: 'Trò chuyện', icon: 'M3 3h10v7H7l-4 3V3Z' },
     {
-      action: 'translate',
-      label: 'Dịch văn bản',
-      icon: 'M2 4h8M6 2v2m-3 0c0 4 5 6 5 6M9 4c0 3-3 5-6 7m7 2 2-6 2 6m-3-2h3',
+      action: 'home',
+      label: 'Không gian làm việc',
+      icon: 'M3 10.5 12 3l9 7.5M5 9v11h14V9M9 20v-6h6v6',
     },
     {
       action: 'settings',

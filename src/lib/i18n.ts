@@ -67,6 +67,7 @@ const en: Record<string, string> = {
   'Một chút giúp đỡ,': 'A little help,',
   'một ngày nhẹ hơn.': 'a lighter day.',
   Skin: 'Skin',
+  'Không gian làm việc': 'Workspace',
   'Đã lưu thay đổi': 'Changes saved',
   'Đã khôi phục mặc định': 'Defaults restored',
   'Đã cập nhật key trong OS keychain': 'Key updated in OS keychain',

@@ -15,7 +15,7 @@
   } from './mascot/machine';
   let view =
     new URLSearchParams(location.search).get('view') ||
-    (desktop ? 'mascot' : 'chat');
+    (desktop ? 'mascot' : 'main');
   let config: Config = structuredClone(defaults);
   let state: State = 'idle';
   let pose: Pose = 'idle';
@@ -236,7 +236,7 @@
     {#if !desktop}<div class="preview-bar">
         <span>MICHIYO · BẢN XEM TRƯỚC</span>
         <div>
-          {#each [['chat', 'Chat'], ['translate', 'Dịch'], ['settings', 'Cài đặt']] as item}<button
+          {#each [['main', 'Chat & Workspace'], ['settings', 'Cài đặt']] as item}<button
               class:active={view === item[0]}
               onclick={() => (view = item[0])}>{t(item[1], $locale)}</button
             >{/each}
@@ -247,9 +247,6 @@
             this={module.default}
             bind:config
             {save}
-          />{/await}{:else if view === 'translate'}{#await import('./translate/Translate.svelte') then module}<svelte:component
-            this={module.default}
-            compact={desktop}
           />{/await}{:else}{#await import('./chat/Chat.svelte') then module}<svelte:component
             this={module.default}
             {config}
