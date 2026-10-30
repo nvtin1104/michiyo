@@ -61,6 +61,14 @@
   let atRight = false;
   let dockPosition = 0;
   let dockFrame = 0;
+  let dockEl: HTMLDivElement;
+  let dockPointer = { x: 80, y: 80 };
+  let dockPressing = false;
+  let dockDragging = false;
+  let dockPetting = false;
+  let dockHeadPress = false;
+  let dockStart = { x: 0, y: 0, pos: 0 };
+  let dockHoldTimer: ReturnType<typeof setTimeout>;
   let entering = false;
   let entryTimer: ReturnType<typeof setTimeout>;
   function playEntry() {
@@ -93,7 +101,13 @@
   }
 
   function handleMascotClick() {
+    if (dockDragging || dockPetting) return;
     reactMascot('touched');
+  }
+
+  function cancelDockPress() {
+    clearTimeout(dockHoldTimer);
+    dockPressing = false;
   }
 
   function formatTime(d = new Date()) {
@@ -277,6 +291,8 @@
           conversations[0];
         if (main?.messages?.length) {
           messages = main.messages;
+          if (!compact)
+            tick().then(() => scroll?.scrollTo(0, scroll.scrollHeight));
         }
         historyReady = true;
       } catch (e) {
@@ -547,14 +563,6 @@
         >
           {#if message.role === 'user'}
             <div class="user-text">{message.content}</div>
-            <div class="avatar user-avatar" title="Bạn">
-              <svg aria-hidden="true" viewBox="0 0 32 32" fill="none"
-                ><circle cx="16" cy="12" r="5" fill="#76988c" /><path
-                  d="M6.5 26c.7-5 4.1-8 9.5-8s8.8 3 9.5 8"
-                  fill="#76988c"
-                /></svg
-              >
-            </div>
           {:else}
             <div class="markdown">
               {@html DOMPurify.sanitize(
@@ -660,10 +668,11 @@
   </div>
 {/if}
 
-<!-- Companion Dock: Mascot directly above input -->
+<!-- Companion Dock: Mascot directly above input (draggable & interactive) -->
 {#if !compact}
   <div
     class="companion-dock"
+    bind:this={dockEl}
     role="region"
     aria-label="Bé bot Michiyo"
     class:reduced={reducedMotion}
@@ -674,17 +683,84 @@
     <button
       type="button"
       class="companion-touch-zone"
+      class:dragging={dockDragging}
       style:left={`calc((100% - 88px) * ${dockPosition})`}
-      title="Nhấp để tương tác cùng Michiyo"
+      title="Nhấp để tương tác · Giữ trên đầu để xoa đầu · Kéo ngang để di chuyển Reze"
       onclick={handleMascotClick}
       onpointerenter={() => {
+        if (dockPressing) return;
         stopDockMotion();
         mascotMachine.hover(true);
         syncMascot();
       }}
       onpointerleave={() => {
+        if (dockPressing) return;
         mascotMachine.hover(false);
         syncMascot();
+      }}
+      onpointerdown={(e) => {
+        if (e.button !== 0) return;
+        stopDockMotion();
+        cancelDockPress();
+        const r = e.currentTarget.getBoundingClientRect();
+        const relY = (e.clientY - r.top) / Math.max(1, r.height);
+        dockHeadPress = relY < 0.56;
+        dockPressing = true;
+        dockDragging = false;
+        dockPetting = false;
+        dockStart = { x: e.clientX, y: e.clientY, pos: dockPosition };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        if (dockHeadPress && config.touchReactions) {
+          dockHoldTimer = setTimeout(() => {
+            if (dockPressing && !dockDragging) {
+              dockPetting = true;
+              reactMascot('petting');
+            }
+          }, 420);
+        }
+      }}
+      onpointermove={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        dockPointer = {
+          x: ((e.clientX - r.left) / Math.max(1, r.width)) * 160,
+          y: ((e.clientY - r.top) / Math.max(1, r.height)) * 160,
+        };
+        if (!dockPressing) return;
+        const dx = e.clientX - dockStart.x;
+        const dy = e.clientY - dockStart.y;
+        if (!dockDragging && Math.hypot(dx, dy) > 5) {
+          dockDragging = true;
+          clearTimeout(dockHoldTimer);
+          reactMascot(dockHeadPress ? 'dragging' : 'carried');
+        }
+        if (dockDragging && dockEl) {
+          const track = Math.max(1, dockEl.getBoundingClientRect().width - 88);
+          dockPosition = Math.max(0, Math.min(1, dockStart.pos + dx / track));
+          if (Math.abs(dx) > 2) atRight = dx > 0;
+        }
+      }}
+      onpointerup={(e) => {
+        if (e.button !== 0) return;
+        const wasDragging = dockDragging;
+        cancelDockPress();
+        if (e.currentTarget.hasPointerCapture(e.pointerId))
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        if (wasDragging) {
+          reactMascot('settling');
+          setTimeout(() => {
+            dockDragging = false;
+          }, 60);
+        } else if (dockPetting) {
+          setTimeout(() => {
+            dockPetting = false;
+          }, 60);
+        }
+      }}
+      onpointercancel={() => {
+        cancelDockPress();
+        if (dockDragging) reactMascot('settling');
+        dockDragging = false;
+        dockPetting = false;
       }}
     >
       <div class="companion-frame" class:entering>
@@ -692,6 +768,9 @@
         {#if active}<Companion
             state={displayedPose}
             facing={atRight ? 1 : -1}
+            pointer={dockPointer}
+            tracking={config.cursorTracking}
+            eyeTracking={true}
             speed={config.animationSpeed}
             reduced={reducedMotion}
             skin={config.skin}
@@ -718,9 +797,7 @@
     title={compact
       ? 'Enter để gửi · Esc để đóng · Ctrl+Enter để mở trong app'
       : undefined}
-    placeholder={compact
-      ? 'Hỏi Michiyo…'
-      : t('Nhập tin nhắn tâm sự hoặc câu hỏi cùng Michiyo…', $locale)}
+    placeholder={compact ? 'Hỏi Michiyo…' : t('Nhắn cho Michiyo…', $locale)}
     oninput={() => {
       if (compact) input = input.replace(/[\r\n]+/g, ' ');
       resizeComposer();
@@ -756,29 +833,30 @@
             type="button"
             class="stop-btn"
             aria-label="Dừng trả lời"
+            title="Dừng trả lời"
             onclick={() => call('stop_chat', { id: job })}
           >
-            {compact ? '■' : '■ Dừng'}
+            ■
           </button>
         {:else}
           <button
             type="submit"
             class="primary send-btn"
             aria-label="Gửi tin nhắn"
+            title="Gửi tin nhắn"
             disabled={!input.trim() || !historyReady}
           >
-            <span>{compact ? '↑' : 'Gửi'}</span>
-            {#if !compact}
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
-              </svg>
-            {/if}
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M5 12h14M13 5l7 7-7 7" />
+            </svg>
           </button>
         {/if}
       </div>
@@ -786,17 +864,36 @@
 </form>
 
 <style>
-  /* Stream & Messages */
+  /* Stream & Messages - Full width so scrollbar is flush against right edge */
   .chat-stream-container {
     flex: 1;
     min-height: 0;
+    width: 100%;
     overflow-y: auto;
-    padding: 8px 6px 18px;
+    padding: 8px 0 54px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
     scrollbar-width: thin;
-    scrollbar-color: #cdd9cc transparent;
+    scrollbar-color: #c2cfc3 transparent;
+  }
+  .chat-stream-container::-webkit-scrollbar {
+    width: 6px;
+  }
+  .chat-stream-container::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .chat-stream-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .chat-stream-container::-webkit-scrollbar-thumb {
+    background: #c2cfc3;
+    border-radius: 999px;
+  }
+  .chat-stream-container::-webkit-scrollbar-thumb:hover {
+    background: #9db09f;
   }
   .msg-bubble.arriving {
     animation: message-arrive 220ms ease-out both;
@@ -819,7 +916,8 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    margin: auto 0;
+    width: min(calc(100% - 48px), 820px);
+    margin: auto;
     padding: 30px 16px;
   }
   .welcome-badge {
@@ -870,36 +968,26 @@
     display: flex;
     gap: 10px;
     align-items: flex-start;
-    max-width: 86%;
+    width: min(calc(100% - 48px), 820px);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .compact-stream .msg-row {
+    width: 100%;
+    max-width: 100%;
   }
   .msg-row.user-row {
-    margin-left: auto;
     flex-direction: row;
     justify-content: flex-end;
   }
   .msg-row.bot-row {
-    margin-right: auto;
     justify-content: flex-start;
   }
-  .avatar {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    font-size: 16px;
-    user-select: none;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  .bubble-wrap {
+    max-width: 84%;
   }
-  .user-avatar {
-    background: #e3f0ed;
-    border: 1px solid #cde2dc;
-  }
-  .avatar svg {
-    width: 28px;
-    height: 28px;
+  .compact-stream .bubble-wrap {
+    max-width: 100%;
   }
   .bubble-wrap {
     display: flex;
@@ -929,8 +1017,7 @@
   .chat-stream-container:not(.compact-stream) .user-row article.msg-bubble {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 7px 8px 7px 17px;
+    padding: 10px 16px;
     background: #e3f3e8;
     color: #244433;
     border: 1px solid #cde7d5;
@@ -1040,26 +1127,38 @@
     border-width: 0;
   }
 
-  /* Companion Dock directly above input - unconstrained & natural */
+  /* Companion Dock directly above input - zero net height so it adds no extra vertical padding */
   .companion-dock {
     position: relative;
-    height: 72px;
-    width: 100%;
+    height: 1px;
+    margin-top: -1px;
+    overflow: visible;
+    width: min(calc(100% - 48px), 820px);
+    margin-left: auto;
+    margin-right: auto;
     flex: none;
     user-select: none;
+    z-index: 2;
+    pointer-events: none;
   }
   .companion-touch-zone {
     position: absolute;
-    bottom: -8px;
-    z-index: 1;
+    bottom: -10px;
+    z-index: 2;
+    pointer-events: auto;
     background: transparent;
     border: 0;
     padding: 0;
-    cursor: pointer;
+    cursor: grab;
+    touch-action: none;
     outline: none;
     display: flex;
     align-items: flex-end;
     transition: transform 0.2s ease;
+  }
+  .companion-touch-zone.dragging {
+    cursor: grabbing;
+    transform: translateY(-6px) scale(1.05);
   }
   .companion-touch-zone:hover {
     background: transparent;
@@ -1139,42 +1238,43 @@
     width: 88px;
     height: 88px;
   }
-  /* Chat Composer Form */
+  /* Simplified Chat Composer Form */
   .chat-composer {
     background: #ffffff;
-    border: 1px solid #d5dfd5;
-    border-radius: 16px;
-    padding: 8px 8px 8px 16px;
-    box-shadow: 0 4px 16px rgba(41, 68, 50, 0.06);
+    border: 1px solid #d8e1d8;
+    border-radius: 24px;
+    padding: 5px 6px 5px 18px;
+    box-shadow: 0 2px 10px rgba(41, 68, 50, 0.04);
     display: flex;
     flex-direction: row;
-    align-items: flex-end;
+    align-items: center;
     gap: 8px;
     transition:
       border-color 0.15s ease,
       box-shadow 0.15s ease;
-    margin-top: 0;
+    width: min(calc(100% - 48px), 820px);
+    margin: 0 auto;
     flex: none;
   }
   .chat-composer:focus-within {
     border-color: #3e6d4e;
-    box-shadow: 0 4px 20px rgba(41, 68, 50, 0.11);
+    box-shadow: 0 3px 14px rgba(41, 68, 50, 0.09);
   }
   .chat-composer textarea {
     flex: 1;
     width: 100%;
     min-width: 0;
-    min-height: 28px;
-    max-height: 120px;
+    min-height: 24px;
+    max-height: 108px;
     resize: none;
     border: 0;
     outline: none;
     font-family: inherit;
-    font-size: 14.5px;
-    line-height: 1.5;
+    font-size: 14px;
+    line-height: 1.45;
     color: #213326;
     background: transparent;
-    padding: 0;
+    padding: 2px 0;
   }
   .compact-composer textarea {
     min-height: 28px !important;
@@ -1183,57 +1283,67 @@
     font-size: 13.5px;
   }
   .chat-composer textarea::placeholder {
-    color: #8d9e90;
+    color: #93a396;
   }
   .composer-footer {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     flex: none;
   }
   .composer-buttons {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     margin-left: auto;
   }
   .send-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 7px 18px;
-    border-radius: 10px;
+    justify-content: center;
     background: #2d503b;
     color: #fff;
-    font-size: 13.5px;
-    font-weight: 600;
     border: 0;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition:
+      background 0.15s ease,
+      transform 0.15s ease;
   }
   .send-btn svg {
-    width: 14px;
-    height: 14px;
+    width: 15px;
+    height: 15px;
   }
   .send-btn:hover:not(:disabled) {
     background: #244130;
+    transform: scale(1.04);
   }
   .send-btn:disabled {
-    opacity: 0.45;
+    opacity: 0.35;
     cursor: not-allowed;
   }
   .stop-btn {
-    padding: 7px 14px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: #d44848;
     color: #fff;
     border: 0;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 700;
     cursor: pointer;
   }
 
   /* Compact mode overrides */
   .compact-composer {
+    width: 100%;
+    margin: 0;
     padding: 0 2px 3px;
     align-items: center;
     border: 0;
@@ -1301,7 +1411,12 @@
     background: #fff6e6;
     border: 1px solid #f2dab3;
     color: #7a5416;
-    margin-bottom: 8px;
+    width: min(calc(100% - 48px), 820px);
+    margin: 0 auto 8px;
+  }
+  :global(.bubble) .chat-notice {
+    width: 100%;
+    margin: 0;
   }
   .chat-notice.notice-error {
     background: #fdf0f0;
