@@ -15,7 +15,18 @@ export type Reaction =
   | 'carried'
   | 'settling'
   | 'waking';
-export type Pose = State | Reaction | 'walk' | 'sit' | 'wave';
+export type Pose =
+  | State
+  | Reaction
+  | 'walk'
+  | 'run'
+  | 'jump'
+  | 'jump_prepare'
+  | 'land'
+  | 'sit'
+  | 'stand'
+  | 'wave'
+  | 'turn';
 const states: State[] = [
   'idle',
   'hover',
@@ -32,24 +43,47 @@ export class MascotMachine {
   state: State = 'idle';
   reaction: Reaction | null = null;
   private reactionUntil = 0;
+  motion:
+    | 'walk'
+    | 'run'
+    | 'jump'
+    | 'jump_prepare'
+    | 'land'
+    | 'sit'
+    | 'stand'
+    | 'wave'
+    | 'turn'
+    | null = null;
+  get canMove() {
+    return this.state === 'idle' && !this.reaction;
+  }
+  setMotion(pose: typeof this.motion) {
+    this.motion = this.canMove ? pose : null;
+  }
+  stopMotion() {
+    this.motion = null;
+  }
   private lastTouch = -Infinity;
   lastActivity = Date.now();
   get pose(): Pose {
-    return this.reaction || this.state;
+    return (
+      this.reaction || (this.state === 'idle' && this.motion) || this.state
+    );
   }
   react(next: Reaction, now = Date.now()) {
     if (next === 'touched' && now - this.lastTouch < 500) return;
     if (next === 'touched') this.lastTouch = now;
     if (this.state === 'sleep') {
       this.state = 'idle';
-      next = 'waking';
+      if (next !== 'dragging' && next !== 'carried') next = 'waking';
     }
     this.lastActivity = now;
+    this.stopMotion();
     this.reaction = next;
     this.reactionUntil =
       now +
       (next === 'dragging' || next === 'carried'
-        ? 15000
+        ? Infinity
         : next === 'petting'
           ? 1800
           : 1100);
@@ -61,6 +95,7 @@ export class MascotMachine {
   }
   transition(next: State) {
     this.state = next;
+    if (next !== 'idle') this.stopMotion();
     if (next !== 'sleep') this.lastActivity = Date.now();
     return this.state;
   }

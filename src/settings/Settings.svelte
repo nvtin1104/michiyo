@@ -109,7 +109,13 @@
     if (desktop) {
       call<Record<string, boolean>>('secret_status').then((v) => (stored = v));
       call<{ names: string[]; directory: string }>('list_skins').then((v) => {
-        skins = [...new Set(['reze', 'moon-gardener', ...v.names.filter((name) => name !== 'default')])];
+        skins = [
+          ...new Set([
+            'reze',
+            'moon-gardener',
+            ...v.names.filter((name) => name !== 'default'),
+          ]),
+        ];
         skinDirectory = v.directory;
       });
     }
@@ -275,8 +281,8 @@
           /></label
         >
         <p class="muted">
-          Offline không gửi chat hay bản dịch ra ngoài máy; Hybrid dùng model cục
-          bộ khi model chính lỗi.
+          Offline không gửi chat hay bản dịch ra ngoài máy; Hybrid dùng model
+          cục bộ khi model chính lỗi.
         </p>
         <label
           >Nguồn model<Select
@@ -360,8 +366,8 @@
                 list="models-external"
                 bind:value={config.openaiModel}
               /><datalist id="models-external"
-                >{#each models.external as id}<option value={id}></option
-                  >{/each}</datalist
+                >{#each models.external as id}<option value={id}
+                  ></option>{/each}</datalist
               ></label
             >
             <div class="key-card">
@@ -400,20 +406,19 @@
             list="models-local"
             bind:value={config.localModel}
           /><datalist id="models-local"
-            >{#each models.local as id}<option value={id}></option>{/each}</datalist
+            >{#each models.local as id}<option value={id}
+              ></option>{/each}</datalist
           ></label
         >
         <div class="actions">
-          <button onclick={() => loadModels('local')}
-            >Kiểm tra kết nối</button
-          >
+          <button onclick={() => loadModels('local')}>Kiểm tra kết nối</button>
         </div>
       {:else if tab === 'Đồng bộ'}
         {#await loadSync()}{/await}
         <p class="muted">
           Đồng bộ ghi chú, thói quen, lịch và hoạt động giữa các thiết bị qua
-          Michiyo Cloud. Chế độ Offline tắt hoàn toàn đồng bộ. Lịch sử trò chuyện
-          không bao giờ được đồng bộ.
+          Michiyo Cloud. Chế độ Offline tắt hoàn toàn đồng bộ. Lịch sử trò
+          chuyện không bao giờ được đồng bộ.
         </p>
         <div class="key-card">
           <h3>
@@ -430,8 +435,8 @@
             </p>
           {:else}
             <p class="muted">
-              Cần chế độ Online/Hybrid, địa chỉ Michiyo Cloud và thiết bị đã ghép
-              nối (tab AI).
+              Cần chế độ Online/Hybrid, địa chỉ Michiyo Cloud và thiết bị đã
+              ghép nối (tab AI).
             </p>
           {/if}
           {#if sync?.last_error}<p class="error" role="alert">
@@ -449,7 +454,9 @@
             ><input
               type="checkbox"
               aria-label={label}
-              bind:checked={config.syncScopes[name as keyof typeof config.syncScopes]}
+              bind:checked={
+                config.syncScopes[name as keyof typeof config.syncScopes]
+              }
             />{label}</label
           >{/each}
       {:else if tab === 'Chat'}<label
@@ -566,7 +573,7 @@
                   ? 'Moon gardener'
                   : value === 'reze'
                     ? 'Reze (pixel)'
-                  : value,
+                    : value,
             }))}
             onchange={changed}
           /></label
@@ -581,6 +588,11 @@
         ><label class="check"
           ><input type="checkbox" bind:checked={config.reducedMotion} />{t(
             'Giảm chuyển động',
+            $locale,
+          )}</label
+        ><label class="check"
+          ><input type="checkbox" bind:checked={config.autonomousMovement} />{t(
+            'Mascot tự di chuyển',
             $locale,
           )}</label
         ><label
@@ -620,7 +632,13 @@
               const v = await call<{ names: string[]; directory: string }>(
                 'list_skins',
               );
-              skins = [...new Set(['reze', 'moon-gardener', ...v.names.filter((name) => name !== 'default')])];
+              skins = [
+                ...new Set([
+                  'reze',
+                  'moon-gardener',
+                  ...v.names.filter((name) => name !== 'default'),
+                ]),
+              ];
               skinDirectory = v.directory;
             }}>↻ Quét skin</button
           >

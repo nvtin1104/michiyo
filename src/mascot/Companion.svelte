@@ -5,8 +5,19 @@
   export let speed = 1;
   export let reduced = false;
   export let skin = 'default';
+  export let facing = 1;
+  export let motionDistance: number | undefined = undefined;
   export let pointer = { x: 80, y: 80 };
   export let tracking = true;
 </script>
 
-<Mascot {state} {speed} {reduced} {pointer} {tracking} {skin} />
+<Mascot
+  {state}
+  {facing}
+  {motionDistance}
+  {speed}
+  {reduced}
+  {pointer}
+  {tracking}
+  {skin}
+/>

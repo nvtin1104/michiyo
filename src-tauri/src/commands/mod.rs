@@ -1,4 +1,5 @@
 pub mod skins;
+pub mod motion;
 use crate::{
     config,
     providers::{Provider, Translation, Translator},
@@ -27,6 +28,8 @@ pub struct Runtime {
     pub pending_chat: Mutex<Option<String>>,
     pub anchor: Mutex<Option<String>>,
     pub move_generation: std::sync::atomic::AtomicU64,
+    pub move_save_active: std::sync::atomic::AtomicBool,
+    pub surface_scan_active: std::sync::atomic::AtomicBool,
 }
 impl Default for Runtime {
     fn default() -> Self {
@@ -51,6 +54,8 @@ impl Default for Runtime {
             pending_chat: Mutex::new(None),
             anchor: Mutex::new(None),
             move_generation: std::sync::atomic::AtomicU64::new(0),
+            move_save_active: std::sync::atomic::AtomicBool::new(false),
+            surface_scan_active: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }

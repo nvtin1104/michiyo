@@ -15,7 +15,7 @@
   export let active = true;
   export let onNavigate: ((route: string) => void) | undefined = undefined;
   let manageTimers: () => void = () => {};
-  $: active, manageTimers();
+  $: (active, manageTimers());
 
   let composer: HTMLTextAreaElement;
   const focus = () => tick().then(() => composer?.focus());
@@ -51,15 +51,64 @@
   let ambientPose: Pose = 'sit';
   let ambientStep = 0;
   let atRight = false;
+  let dockPosition = 0;
+  let dockWidth = 0;
+  let dockDistance = 0;
+  let dockFrame = 0;
+  function stopDockMotion() {
+    cancelAnimationFrame(dockFrame);
+    mascotMachine.stopMotion();
+    syncMascot();
+  }
+  function moveDock() {
+    if (
+      !mascotMachine.canMove ||
+      reducedMotion ||
+      !active ||
+      !config.autonomousMovement
+    )
+      return;
+    const start = dockPosition,
+      end = atRight ? 0 : 1;
+    atRight = !atRight;
+    const started = performance.now();
+    dockDistance = 0;
+    mascotMachine.setMotion('walk');
+    syncMascot();
+    const frame = (now: number) => {
+      if (
+        !mascotMachine.canMove ||
+        reducedMotion ||
+        !active ||
+        !config.autonomousMovement
+      ) {
+        stopDockMotion();
+        return;
+      }
+      const progress = Math.min(1, (now - started) / 4500);
+      dockPosition = start + (end - start) * progress;
+      dockDistance =
+        (Math.abs(dockPosition - start) * Math.max(0, dockWidth - 88) * 160) /
+        88;
+      if (progress < 1) dockFrame = requestAnimationFrame(frame);
+      else {
+        mascotMachine.stopMotion();
+        syncMascot();
+      }
+    };
+    dockFrame = requestAnimationFrame(frame);
+  }
   let systemReduced = false;
   $: reducedMotion = config.reducedMotion || systemReduced;
-  $: displayedPose = mascotPose === 'idle' && !reducedMotion ? ambientPose : mascotPose;
+  $: displayedPose =
+    mascotPose === 'idle' && !reducedMotion ? ambientPose : mascotPose;
 
   function syncMascot() {
     mascotPose = mascotMachine.pose;
   }
 
   function reactMascot(kind: Parameters<MascotMachine['react']>[0]) {
+    stopDockMotion();
     mascotMachine.react(kind);
     syncMascot();
   }
@@ -107,7 +156,16 @@
   async function persist() {
     if (!desktop) {
       try {
-        localStorage.setItem('michiyo_messages', JSON.stringify(messages.map(({ role, content, time }) => ({ role, content, time }))));
+        localStorage.setItem(
+          'michiyo_messages',
+          JSON.stringify(
+            messages.map(({ role, content, time }) => ({
+              role,
+              content,
+              time,
+            })),
+          ),
+        );
       } catch {}
       return;
     }
@@ -138,23 +196,30 @@
     let resizeTimer: ReturnType<typeof setTimeout>;
     let ambientTimer: ReturnType<typeof setInterval> | undefined;
     const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
-    const motionChanged = () => { systemReduced = motionQuery.matches; };
+    const motionChanged = () => {
+      systemReduced = motionQuery.matches;
+    };
     motionChanged();
     motionQuery.addEventListener('change', motionChanged);
 
     const updateTimers = () => {
       clearInterval(mascotTimer);
       clearInterval(ambientTimer);
-      if (document.hidden || !active) return;
+      if (document.hidden || !active) {
+        stopDockMotion();
+        return;
+      }
       mascotTimer = setInterval(() => {
         mascotMachine.tick(Date.now(), config?.sleepMinutes || 5);
         syncMascot();
       }, 250);
-      if (!compact) ambientTimer = setInterval(() => {
-        ambientStep = (ambientStep + 1) % 3;
-        ambientPose = (['walk', 'sit', 'wave'] as const)[ambientStep];
-        if (ambientPose === 'walk' && !reducedMotion && mascotPose === 'idle') atRight = !atRight;
-      }, 6000);
+      if (!compact)
+        ambientTimer = setInterval(() => {
+          ambientStep = (ambientStep + 1) % 3;
+          ambientPose = (['idle', 'sit', 'wave'] as const)[ambientStep];
+          if (ambientStep === 0 && !reducedMotion && mascotMachine.canMove)
+            moveDock();
+        }, 6000);
     };
     manageTimers = updateTimers;
     updateTimers();
@@ -201,9 +266,10 @@
         );
 
       try {
-        const conversations = await call<
-          { id: string; title: string; messages: Message[] }[]
-        >('history_list');
+        const conversations =
+          await call<{ id: string; title: string; messages: Message[] }[]>(
+            'history_list',
+          );
         const main =
           conversations.find((c) => c.id === MAIN_CONVERSATION_ID) ||
           conversations[0];
@@ -220,7 +286,10 @@
           const follow =
             !scroll ||
             scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 50;
-          if (messages.length && messages[messages.length - 1].role === 'assistant') {
+          if (
+            messages.length &&
+            messages[messages.length - 1].role === 'assistant'
+          ) {
             messages[messages.length - 1].content += e.payload.text;
             messages = [...messages];
           }
@@ -257,6 +326,7 @@
       observer?.disconnect();
       clearInterval(mascotTimer);
       clearInterval(ambientTimer);
+      cancelAnimationFrame(dockFrame);
       clearTimeout(resizeTimer);
       document.removeEventListener('visibilitychange', updateTimers);
       motionQuery.removeEventListener('change', motionChanged);
@@ -398,7 +468,10 @@
     <div class="welcome-box">
       <div class="welcome-badge">🌸</div>
       <h2>Hôm nay bạn cần Michiyo hỗ trợ gì không?</h2>
-      <p>Cứ tự nhiên chia sẻ, hỏi đáp hoặc tâm sự cùng Michiyo như một người bạn nhé.</p>
+      <p>
+        Cứ tự nhiên chia sẻ, hỏi đáp hoặc tâm sự cùng Michiyo như một người bạn
+        nhé.
+      </p>
       <div class="suggestions">
         {#each ['Lên kế hoạch hôm nay giúp mình', 'Giúp tôi viết một email', 'Giải thích một ý tưởng phức tạp', 'Gợi ý các thói quen tốt'] as suggestion}
           <button
@@ -427,7 +500,9 @@
             <span>Michiyo</span>
             {#if busy}
               <span class="stream-label">
-                <i aria-hidden="true"></i>{$locale === 'en' ? 'Replying' : 'Đang trả lời'}
+                <i aria-hidden="true"></i>{$locale === 'en'
+                  ? 'Replying'
+                  : 'Đang trả lời'}
               </span>
             {:else}
               <button
@@ -444,12 +519,19 @@
           class="msg-bubble"
           class:user={message.role === 'user'}
           class:streaming={busy && message === messages.at(-1)}
-          class:arriving={!!message.animate && !!message.content && !reducedMotion}
+          class:arriving={!!message.animate &&
+            !!message.content &&
+            !reducedMotion}
         >
           {#if message.role === 'user'}
             <div class="user-text">{message.content}</div>
             <div class="avatar user-avatar" title="Bạn">
-              <svg aria-hidden="true" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="12" r="5" fill="#76988c"/><path d="M6.5 26c.7-5 4.1-8 9.5-8s8.8 3 9.5 8" fill="#76988c"/></svg>
+              <svg aria-hidden="true" viewBox="0 0 32 32" fill="none"
+                ><circle cx="16" cy="12" r="5" fill="#76988c" /><path
+                  d="M6.5 26c.7-5 4.1-8 9.5-8s8.8 3 9.5 8"
+                  fill="#76988c"
+                /></svg
+              >
             </div>
           {:else}
             <div class="markdown">
@@ -488,7 +570,6 @@
           {/if}
         </div>
       </div>
-
     </div>
   {/each}
 
@@ -553,14 +634,24 @@
 
 <!-- Companion Dock: Mascot directly above input -->
 {#if !compact}
-  <div class="companion-dock" role="region" aria-label="Bé bot Michiyo" class:reduced={reducedMotion} class:walking={displayedPose === 'walk'} class:walking-left={!atRight} data-pose={displayedPose}>
+  <div
+    class="companion-dock"
+    bind:clientWidth={dockWidth}
+    role="region"
+    aria-label="Bé bot Michiyo"
+    class:reduced={reducedMotion}
+    class:walking={displayedPose === 'walk'}
+    class:walking-left={!atRight}
+    data-pose={displayedPose}
+  >
     <button
       type="button"
       class="companion-touch-zone"
-      style:left={atRight ? 'calc(100% - 88px)' : '0px'}
+      style:left={`calc((100% - 88px) * ${dockPosition})`}
       title="Nhấp để tương tác cùng Michiyo"
       onclick={handleMascotClick}
       onpointerenter={() => {
+        stopDockMotion();
         mascotMachine.hover(true);
         syncMascot();
       }}
@@ -571,11 +662,13 @@
     >
       <div class="companion-frame">
         {#if active}<Companion
-          state={displayedPose}
-          speed={config.animationSpeed}
-          reduced={reducedMotion}
-          skin={config.skin}
-        />{/if}
+            state={displayedPose}
+            facing={atRight ? 1 : -1}
+            motionDistance={dockDistance}
+            speed={config.animationSpeed}
+            reduced={reducedMotion}
+            skin={config.skin}
+          />{/if}
       </div>
     </button>
   </div>
@@ -608,8 +701,7 @@
         e.preventDefault();
         send();
       }
-    }}
-  ></textarea>
+    }}></textarea>
 
   <div class="composer-footer">
     <div class="composer-buttons">
@@ -631,7 +723,13 @@
         >
           <span>{compact ? '↑' : 'Gửi'}</span>
           {#if !compact}
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
               <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
             </svg>
           {/if}
@@ -670,10 +768,18 @@
     scrollbar-width: thin;
     scrollbar-color: #cdd9cc transparent;
   }
-  .msg-bubble.arriving { animation: message-arrive 220ms ease-out both; }
+  .msg-bubble.arriving {
+    animation: message-arrive 220ms ease-out both;
+  }
   @keyframes message-arrive {
-    from { opacity: 0; transform: translateY(8px) scale(.98); }
-    to { opacity: 1; transform: none; }
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   /* Welcome view */
@@ -761,7 +867,10 @@
     background: #e3f0ed;
     border: 1px solid #cde2dc;
   }
-  .avatar svg { width: 28px; height: 28px; }
+  .avatar svg {
+    width: 28px;
+    height: 28px;
+  }
   .bubble-wrap {
     display: flex;
     flex-direction: column;
@@ -858,11 +967,23 @@
     border-radius: 50%;
     animation: bounce 1.4s infinite ease-in-out both;
   }
-  .dot:nth-child(1) { animation-delay: -0.32s; }
-  .dot:nth-child(2) { animation-delay: -0.16s; }
+  .dot:nth-child(1) {
+    animation-delay: -0.32s;
+  }
+  .dot:nth-child(2) {
+    animation-delay: -0.16s;
+  }
   @keyframes bounce {
-    0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
-    40% { transform: scale(1); opacity: 1; }
+    0%,
+    80%,
+    100% {
+      transform: scale(0);
+      opacity: 0.4;
+    }
+    40% {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
   .thinking-label {
     font-size: 13px;
@@ -901,14 +1022,18 @@
     outline: none;
     display: flex;
     align-items: flex-end;
-    transition: left 5.5s linear, transform 0.2s ease;
+    transition: transform 0.2s ease;
   }
   .companion-touch-zone:hover {
     background: transparent;
     transform: translateY(-4px) scale(1.06);
   }
-  .companion-dock.reduced .companion-touch-zone { transition: none; }
-  .companion-dock.reduced .companion-touch-zone:hover { transform: none; }
+  .companion-dock.reduced .companion-touch-zone {
+    transition: none;
+  }
+  .companion-dock.reduced .companion-touch-zone:hover {
+    transform: none;
+  }
   .companion-frame {
     width: 88px;
     height: 88px;
@@ -928,9 +1053,6 @@
     width: 88px;
     height: 88px;
   }
-  .walking .companion-frame { animation: walk-bob .35s steps(2) infinite; }
-  .walking-left .companion-frame :global(.sprite) { transform: scaleX(-1); }
-  @keyframes walk-bob { 50% { transform: translateY(-2px); } }
   /* Chat Composer Form */
   .chat-composer {
     background: #ffffff;
@@ -942,7 +1064,9 @@
     flex-direction: row;
     align-items: flex-end;
     gap: 8px;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
     margin-top: 0;
     flex: none;
   }
@@ -1027,8 +1151,12 @@
     padding: 8px 10px;
   }
   @media (prefers-reduced-motion: reduce) {
-    .companion-touch-zone { transition: none; }
-    .msg-bubble.arriving { animation: none; }
+    .companion-touch-zone {
+      transition: none;
+    }
+    .msg-bubble.arriving {
+      animation: none;
+    }
   }
   .compact-stream {
     padding: 6px;

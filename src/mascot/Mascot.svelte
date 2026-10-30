@@ -2,8 +2,11 @@
   import { onMount } from 'svelte';
   import { Application, Sprite, Texture, Rectangle } from 'pixi.js';
   import type { Pose } from './machine';
+  import { strideFrame } from './motion';
   import { call, desktop } from '../lib/api';
   import { listen } from '@tauri-apps/api/event';
+  export let facing = 1;
+  export let motionDistance: number | undefined = undefined;
   export let state: Pose = 'idle';
   export let speed = 1;
   export let reduced = false;
@@ -13,9 +16,14 @@
   let host: HTMLDivElement;
   let ready = false;
   let changeSkin: (name: string) => Promise<void> = async () => {};
-  let refreshPose: (pose: Pose, reduced: boolean) => void = () => {};
+  let refreshPose: (
+    pose: Pose,
+    reduced: boolean,
+    facing: number,
+    distance: number | undefined,
+  ) => void = () => {};
   $: if (ready) changeSkin(skin);
-  $: if (ready) refreshPose(state, reduced);
+  $: if (ready) refreshPose(state, reduced, facing, motionDistance);
   onMount(() => {
     let app: Application;
     let initialized = false;
@@ -27,7 +35,10 @@
     let manifest: {
       frameWidth: number;
       frameHeight: number;
-      states: Record<string, { frames: number[]; fps: number }>;
+      states: Record<
+        string,
+        { frames: number[]; fps: number; stride?: number }
+      >;
     };
     let sheet: Texture;
     let image: HTMLImageElement;
@@ -37,6 +48,7 @@
     let visible = true;
     let offVisible: (() => void) | undefined;
     let maskBusy = false;
+    let lastMaskUpdate = 0;
     let transitionFrame = 0;
     let previousState = state;
     let nextBlink = performance.now() + 2000 + Math.random() * 5000;
@@ -51,7 +63,21 @@
         (state === 'carried' && manifest.states.dragging) ||
         manifest.states.idle;
       let index =
-        animation.frames[Math.floor(frame++) % animation.frames.length];
+        (state === 'walk' || state === 'run') &&
+        manifest.states[state] &&
+        motionDistance !== undefined
+          ? animation.frames[
+              strideFrame(
+                motionDistance,
+                Number.isFinite(animation.stride) && animation.stride! > 0
+                  ? animation.stride!
+                  : state === 'run'
+                    ? 48
+                    : 32,
+                animation.frames.length,
+              )
+            ]
+          : animation.frames[Math.floor(frame++) % animation.frames.length];
       if (
         currentSkin === 'default' &&
         ['hover', 'idle'].includes(state) &&
@@ -88,6 +114,7 @@
         if (previousTexture !== Texture.EMPTY) previousTexture.destroy(false);
         lastFrame = index;
       }
+      sprite.scale.x = Math.abs(sprite.scale.x) * (facing < 0 ? -1 : 1);
       sprite.x = 80;
       sprite.y = 85;
       sprite.rotation = 0;
@@ -102,12 +129,18 @@
         if (state === 'sleep') sprite.y += 2;
       }
       app.render();
-      ctx.clearRect(0, 0, 160, 160);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(app.canvas, 0, 0, 160, 160);
-      const pixels = ctx.getImageData(0, 0, 160, 160).data;
-      if (desktop && new URLSearchParams(location.search).get('view') === 'mascot' && !maskBusy) {
+      if (
+        desktop &&
+        new URLSearchParams(location.search).get('view') === 'mascot' &&
+        !maskBusy &&
+        performance.now() - lastMaskUpdate >= 100
+      ) {
         maskBusy = true;
+        lastMaskUpdate = performance.now();
+        ctx.clearRect(0, 0, 160, 160);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(app.canvas, 0, 0, 160, 160);
+        const pixels = ctx.getImageData(0, 0, 160, 160).data;
         call('set_hit_mask', {
           mask: Array.from({ length: 25600 }, (_, i) => pixels[i * 4 + 3] > 16),
         })
@@ -135,8 +168,10 @@
             : Math.min(12, Math.max(1, animation.fps * speed))),
       );
     };
-    refreshPose = () => {
-      frame = 0;
+    let refreshedState = state;
+    refreshPose = (nextState) => {
+      if (nextState !== refreshedState) frame = 0;
+      refreshedState = nextState;
       clearTimeout(timer);
       if (sheet && !disposed) draw();
     };
@@ -202,6 +237,24 @@
             !Number.isFinite(a.fps)
           )
             throw new Error('State skin không hợp lệ');
+        }
+        // Optional animations in older or custom skins may be absent or malformed.
+        for (const [name, value] of Object.entries(data.states)) {
+          const a = value as { frames?: unknown; fps?: unknown };
+          if (
+            !Array.isArray(a.frames) ||
+            !a.frames.length ||
+            !a.frames.every(
+              (n) =>
+                Number.isInteger(n) &&
+                n >= 0 &&
+                n < (img.width / fw) * (img.height / fh),
+            ) ||
+            typeof a.fps !== 'number' ||
+            !Number.isFinite(a.fps) ||
+            a.fps <= 0
+          )
+            delete data.states[name];
         }
         image = img;
         manifest = data;

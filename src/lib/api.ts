@@ -38,6 +38,7 @@ export const defaults = {
   skin: 'reze',
   animationSpeed: 1,
   reducedMotion: false,
+  autonomousMovement: true,
   cursorTracking: true,
   touchReactions: true,
   clickOpensChat: true,

@@ -72,6 +72,9 @@ fn main() {
             commands::take_chat_prompt,
             commands::ask_translation,
             commands::reset_position,
+            commands::motion::motion_scene,
+            commands::motion::motion_position,
+            commands::motion::mascot_mouse_down,
             commands::copy_text,
             commands::resize_chat,
             commands::menu_action,
@@ -221,30 +224,20 @@ fn main() {
             if matches!(event, tauri::WindowEvent::Moved(_)) && w.label() == "mascot" {
                 use std::sync::atomic::Ordering;
                 let h = w.app_handle().clone();
-                let generation = h
-                    .state::<commands::Runtime>()
-                    .move_generation
-                    .fetch_add(1, Ordering::SeqCst)
-                    + 1;
-                std::thread::spawn(move || loop {
-                    std::thread::sleep(std::time::Duration::from_millis(160));
-                    if h.state::<commands::Runtime>()
-                        .move_generation
-                        .load(Ordering::SeqCst)
-                        != generation
-                    {
-                        return;
-                    }
-                    #[cfg(windows)]
-                    if unsafe {
-                        windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(1)
-                    } < 0
-                    {
-                        continue;
-                    }
-                    let _ = commands::save_mascot_position(h);
-                    break;
-                });
+                let runtime = h.state::<commands::Runtime>();
+                runtime.move_generation.fetch_add(1, Ordering::SeqCst);
+                if !runtime.move_save_active.swap(true, Ordering::SeqCst) {
+                    let h = h.clone();
+                    std::thread::spawn(move || loop {
+                        let generation = h.state::<commands::Runtime>().move_generation.load(Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_millis(160));
+                        if h.state::<commands::Runtime>().move_generation.load(Ordering::SeqCst) != generation || commands::motion::mascot_mouse_down() { continue; }
+                        let _ = commands::save_mascot_position(h.clone());
+                        let runtime = h.state::<commands::Runtime>();
+                        runtime.move_save_active.store(false, Ordering::SeqCst);
+                        if runtime.move_generation.load(Ordering::SeqCst) == generation || runtime.move_save_active.swap(true, Ordering::SeqCst) { break; }
+                    });
+                }
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();

@@ -40,6 +40,7 @@ const en: Record<string, string> = {
     'Example: Ctrl+Alt+T. Registration errors and conflicts appear below.',
   'Tốc độ animation': 'Animation speed',
   'Giảm chuyển động': 'Reduce motion',
+  'Mascot tự di chuyển': 'Autonomous mascot movement',
   'Ngủ sau (phút)': 'Sleep after (minutes)',
   'Live2D · chưa tích hợp (Pixi v8 cần adapter riêng)':
     'Live2D · unavailable (Pixi v8 requires a separate adapter)',
