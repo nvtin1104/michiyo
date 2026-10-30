@@ -37,6 +37,7 @@
   let motionGeneration = 0;
   let motionTimer: ReturnType<typeof setTimeout>;
   let mascotVisible = true;
+  let chatVisible = false;
   let landing: { x: number; y: number } | null = null;
   function stopMotion() {
     motionGeneration++;
@@ -55,6 +56,7 @@
       !config.reducedMotion &&
       !matchMedia('(prefers-reduced-motion: reduce)').matches &&
       mascotVisible &&
+      !chatVisible &&
       !document.hidden &&
       machine.canMove &&
       !pressing;
@@ -270,6 +272,7 @@
     let offConfig: undefined | (() => void);
     let offPointer: undefined | (() => void);
     let offVisible: undefined | (() => void);
+    let offChatVisible: undefined | (() => void);
     let disposed = false;
     reload();
     react('greeting');
@@ -287,6 +290,11 @@
         stopMotion();
         if (mascotVisible) scheduleMotion();
       }).then((f) => (disposed ? f() : (offVisible = f)));
+      listen<boolean>('chat-visible', (e) => {
+        chatVisible = e.payload;
+        stopMotion();
+        if (!chatVisible) scheduleMotion();
+      }).then((f) => (disposed ? f() : (offChatVisible = f)));
       listen('config-changed', () => {
         stopMotion();
         reload().then(() => scheduleMotion());
@@ -306,6 +314,7 @@
       offConfig?.();
       offPointer?.();
       offVisible?.();
+      offChatVisible?.();
       stopMotion();
       disposed = true;
       cancelPress();
@@ -333,7 +342,8 @@
     tabindex="0"
     aria-label="Mở chat Michiyo"
     onkeydown={(e) => {
-      if (e.key === 'Enter') call('open_main', { route: 'chat' });
+      if (e.key === 'Enter' && config.clickOpensChat && desktop)
+        call('open_panel', { label: 'chat' }).catch((e) => (error = String(e)));
     }}
     onpointerdown={(e) => {
       if (e.button !== 0) return;
@@ -399,7 +409,7 @@
       else if (!moved && wasPressing && !petting) {
         react('touched');
         if (config.clickOpensChat && desktop)
-          call('open_main', { route: 'chat' }).catch(
+          call('open_panel', { label: 'chat' }).catch(
             (e) => (error = String(e)),
           );
       }
@@ -420,6 +430,7 @@
         {motionDistance}
         {pointer}
         tracking={config.cursorTracking}
+        eyeTracking={true}
         skin={config.skin}
         speed={config.animationSpeed}
         reduced={config.reducedMotion ||

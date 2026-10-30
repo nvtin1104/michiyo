@@ -8,6 +8,32 @@ export type Scene = {
   surfaces: Rect[];
 };
 export type Point = { x: number; y: number };
+// Optional offsets are measured in source-frame pixels and mirrored with the sprite.
+export function frameOffset(
+  offsets: Record<string, { x?: unknown; y?: unknown }> | undefined,
+  index: number,
+  width: number,
+  height: number,
+  facing: number,
+): Point {
+  const offset = offsets?.[String(index)];
+  const x =
+    typeof offset?.x === 'number' &&
+    Number.isFinite(offset.x) &&
+    Math.abs(offset.x) <= width
+      ? offset.x
+      : 0;
+  const y =
+    typeof offset?.y === 'number' &&
+    Number.isFinite(offset.y) &&
+    Math.abs(offset.y) <= height
+      ? offset.y
+      : 0;
+  return {
+    x: x * (128 / width) * (facing < 0 ? -1 : 1),
+    y: y * (128 / height),
+  };
+}
 export function clampPoint(point: Point, scene: Scene): Point {
   const a = scene.area;
   return {

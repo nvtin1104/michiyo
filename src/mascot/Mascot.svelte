@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Application, Sprite, Texture, Rectangle } from 'pixi.js';
+  import { Application, Graphics, Sprite, Texture, Rectangle } from 'pixi.js';
   import type { Pose } from './machine';
-  import { strideFrame } from './motion';
+  import { frameOffset, strideFrame } from './motion';
   import { call, desktop } from '../lib/api';
   import { listen } from '@tauri-apps/api/event';
   export let facing = 1;
@@ -13,6 +13,7 @@
   export let skin = 'default';
   export let pointer = { x: 80, y: 80 };
   export let tracking = true;
+  export let eyeTracking = false;
   let host: HTMLDivElement;
   let ready = false;
   let changeSkin: (name: string) => Promise<void> = async () => {};
@@ -21,9 +22,21 @@
     reduced: boolean,
     facing: number,
     distance: number | undefined,
+    pointer: { x: number; y: number },
+    tracking: boolean,
+    eyeTracking: boolean,
   ) => void = () => {};
   $: if (ready) changeSkin(skin);
-  $: if (ready) refreshPose(state, reduced, facing, motionDistance);
+  $: if (ready)
+    refreshPose(
+      state,
+      reduced,
+      facing,
+      motionDistance,
+      pointer,
+      tracking,
+      eyeTracking,
+    );
   onMount(() => {
     let app: Application;
     let initialized = false;
@@ -35,6 +48,7 @@
     let manifest: {
       frameWidth: number;
       frameHeight: number;
+      frameOffsets?: Record<string, { x?: unknown; y?: unknown }>;
       states: Record<
         string,
         { frames: number[]; fps: number; stride?: number }
@@ -43,6 +57,7 @@
     let sheet: Texture;
     let image: HTMLImageElement;
     let sprite: Sprite;
+    let eyes: Graphics;
     let lastFrame = -1;
     let loadId = 0;
     let visible = true;
@@ -56,7 +71,7 @@
     maskCanvas.width = 160;
     maskCanvas.height = 160;
     const ctx = maskCanvas.getContext('2d', { willReadFrequently: true })!;
-    const draw = () => {
+    const draw = (advance = true, schedule = true) => {
       if (disposed || document.hidden || !visible || !sheet) return;
       const animation =
         manifest.states[state] ||
@@ -77,7 +92,10 @@
                 animation.frames.length,
               )
             ]
-          : animation.frames[Math.floor(frame++) % animation.frames.length];
+          : animation.frames[
+              Math.floor(advance ? frame++ : Math.max(0, frame - 1)) %
+                animation.frames.length
+            ];
       if (
         currentSkin === 'default' &&
         ['hover', 'idle'].includes(state) &&
@@ -115,9 +133,33 @@
         lastFrame = index;
       }
       sprite.scale.x = Math.abs(sprite.scale.x) * (facing < 0 ? -1 : 1);
-      sprite.x = 80;
-      sprite.y = 85;
+      const offset = frameOffset(manifest.frameOffsets, index, fw, fh, facing);
+      sprite.x = 80 + offset.x;
+      sprite.y = 85 + offset.y;
       sprite.rotation = 0;
+      eyes.clear();
+      if (
+        currentSkin === 'reze' &&
+        eyeTracking &&
+        tracking &&
+        !reduced &&
+        index === 0 &&
+        ['idle', 'hover'].includes(state)
+      ) {
+        const dx =
+          Math.max(-1, Math.min(1, (pointer.x - 80) / 100)) *
+          (facing < 0 ? -1 : 1);
+        const dy = Math.max(-1, Math.min(1, (pointer.y - 80) / 100));
+        for (const eyeX of [179, 231]) {
+          eyes.ellipse(eyeX - 160, 113 - 160, 5, 6).fill(0x68a94b);
+          eyes
+            .ellipse(eyeX - 160 + dx * 2.2, 113 - 160 + dy * 1.5, 2.2, 3.5)
+            .fill(0x213c27);
+          eyes
+            .circle(eyeX - 161 + dx * 2.2, 111 - 160 + dy * 1.5, 0.9)
+            .fill(0xe7f5c9);
+        }
+      }
       if (!reduced) {
         const wave = Math.sin(performance.now() / 180);
         if (state === 'happy' || state === 'greeting')
@@ -160,20 +202,22 @@
         };
         transitionFrame = requestAnimationFrame(tween);
       }
-      timer = setTimeout(
-        draw,
-        1000 /
-          (reduced || state === 'sleep'
-            ? 1
-            : Math.min(12, Math.max(1, animation.fps * speed))),
-      );
+      if (schedule)
+        timer = setTimeout(
+          () => draw(),
+          1000 /
+            (reduced || state === 'sleep'
+              ? 1
+              : Math.min(12, Math.max(1, animation.fps * speed))),
+        );
     };
     let refreshedState = state;
     refreshPose = (nextState) => {
-      if (nextState !== refreshedState) frame = 0;
+      const changed = nextState !== refreshedState;
+      if (changed) frame = 0;
       refreshedState = nextState;
-      clearTimeout(timer);
-      if (sheet && !disposed) draw();
+      if (changed) clearTimeout(timer);
+      if (sheet && !disposed) draw(changed, changed);
     };
     changeSkin = async (name) => {
       if (name === currentSkin) return;
@@ -293,6 +337,8 @@
       sprite = new Sprite();
       sprite.anchor.set(0.5);
       sprite.position.set(80, 85);
+      eyes = new Graphics();
+      sprite.addChild(eyes);
       app.stage.addChild(sprite);
       ready = true;
       await changeSkin(skin);

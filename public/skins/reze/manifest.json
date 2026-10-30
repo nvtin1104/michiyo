@@ -2,6 +2,10 @@
   "name": "Reze (pixel)",
   "frameWidth": 320,
   "frameHeight": 320,
+  "frameOffsets": {
+    "0": { "x": -38, "y": 0 },
+    "8": { "x": -47, "y": 0 }
+  },
   "states": {
     "idle": {
       "frames": [0, 0, 0, 1],

@@ -60,6 +60,7 @@ try {
           return window.historyMock || [];
         }
         if (command === 'history_save') return [args.conversation];
+        if (command === 'resize_chat') return window.testMaxHeight || 720;
         if (command === 'history_delete') return [];
         if (command === 'plugin:store|load') return 1;
         if (command === 'plugin:store|get') return [null, false];
@@ -72,6 +73,8 @@ try {
         if (command === 'chat') {
           if (window.chatError) throw window.chatError;
           const handler = events.get('chat-delta');
+          if (window.pauseBeforeFirst)
+            await new Promise((resolve) => (window.releaseFirst = resolve));
           if (window.streamChunks) {
             const [first, ...remaining] = window.streamChunks;
             callbacks.get(handler)?.({ payload: { id: args.id, text: first } });
@@ -84,9 +87,10 @@ try {
             payload: {
               id: args.id,
               text:
-                args.messages.length > 1
+                window.longReply ||
+                (args.messages.length > 1
                   ? 'Câu trả lời mới nhất.'
-                  : 'Câu trả lời kiểm thử ngay trong bong bóng.',
+                  : 'Câu trả lời kiểm thử ngay trong bong bóng.'),
             },
           });
         }
@@ -110,6 +114,26 @@ try {
     'none',
   );
   assert.equal(await page.locator('.mascot-hint').count(), 0);
+  await page.waitForTimeout(1400);
+  await page.evaluate(() =>
+    window.emitMockEvent('mascot-pointer', { x: -100, y: 80 }),
+  );
+  await page.waitForTimeout(80);
+  const lookingLeft = await page
+    .locator('.sprite canvas')
+    .screenshot({ path: 'artifacts/mascot-look-left.png' });
+  await page.evaluate(() =>
+    window.emitMockEvent('mascot-pointer', { x: 260, y: 80 }),
+  );
+  await page.waitForTimeout(80);
+  const lookingRight = await page
+    .locator('.sprite canvas')
+    .screenshot({ path: 'artifacts/mascot-look-right.png' });
+  assert.notDeepEqual(
+    lookingLeft,
+    lookingRight,
+    'Reze eyes should follow the pointer',
+  );
   await page.mouse.click(80, 80, { button: 'right' });
   assert.equal(
     await page.evaluate(
@@ -127,8 +151,8 @@ try {
   assert.deepEqual(
     await page.evaluate(() =>
       window.calls
-        .filter((c) => c.command === 'open_main')
-        .map((c) => c.args.route),
+        .filter((c) => c.command === 'open_panel')
+        .map((c) => c.args.label),
     ),
     ['chat'],
   );
@@ -147,8 +171,30 @@ try {
   await page.waitForFunction(
     () => document.activeElement?.tagName === 'TEXTAREA',
   );
+  await page.waitForFunction(
+    () =>
+      window.emitMockEvent &&
+      window.calls.some((c) => c.command === 'history_list'),
+  );
+  await page.waitForTimeout(100);
+  await page.evaluate(() => {
+    document.activeElement.blur();
+    window.emitMockEvent('chat-focus');
+  });
+  await page.waitForFunction(
+    () => document.activeElement?.tagName === 'TEXTAREA',
+  );
+  assert.equal(await page.locator('.compact-stream').isVisible(), false);
+  assert.equal(await page.locator('.compact-composer button').count(), 0);
+  const composerStyle = await page.locator('.compact-composer').evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { background: style.backgroundColor, top: style.borderTopWidth, bottom: style.borderBottomWidth, radius: style.borderRadius, shadow: style.boxShadow };
+  });
+  assert.deepEqual(composerStyle, { background: 'rgba(0, 0, 0, 0)', top: '0px', bottom: '1px', radius: '0px', shadow: 'none' });
+  await page.addStyleTag({ content: 'html{background:#242424!important}' });
+  await page.screenshot({ path: 'artifacts/chat-empty.png' });
   await input.fill('Bản nháp');
-  await page.getByRole('button', { name: 'Mở trong app' }).click();
+  await input.press('Control+Enter');
   assert.equal(
     await page.evaluate(
       () =>
@@ -220,14 +266,37 @@ try {
         '! Mình có thể giúp gì cho bạn hôm nay?',
       ]),
   );
+  await page.evaluate(() => (window.pauseBeforeFirst = true));
   await input.fill('Nói chuyện với mình');
   await input.press('Enter');
+  await page.getByText('Michiyo đang suy nghĩ…', { exact: true }).waitFor();
+  const thinkingStyle = await page
+    .locator('.thinking-bubble')
+    .evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        background: style.backgroundColor,
+        border: style.borderTopWidth,
+        shadow: style.boxShadow,
+      };
+    });
+  assert.deepEqual(thinkingStyle, {
+    background: 'rgba(0, 0, 0, 0)',
+    border: '0px',
+    shadow: 'none',
+  });
+  await page.screenshot({ path: 'artifacts/chat-thinking.png' });
+  await page.waitForFunction(() => typeof window.releaseFirst === 'function');
+  await page.evaluate(() => {
+    window.pauseBeforeFirst = false;
+    window.releaseFirst();
+  });
   await page.getByText('Chào bạn', { exact: true }).waitFor();
   await page.getByText('Đang trả lời', { exact: true }).waitFor();
   assert.equal(await page.locator('article.streaming').count(), 1);
   assert.equal(
     await page.getByRole('button', { name: 'Dừng trả lời' }).count(),
-    1,
+    0,
   );
   assert.equal(
     await page.getByText('✦ Michiyo đang suy nghĩ…', { exact: true }).count(),
@@ -247,7 +316,7 @@ try {
   await page.locator('article.streaming').waitFor({ state: 'detached' });
   assert.equal(
     await page.getByRole('button', { name: 'Sao chép câu trả lời' }).count(),
-    1,
+    0,
   );
   await page.evaluate(() => (window.streamChunks = null));
   const savedBefore = await page.evaluate(
@@ -347,14 +416,63 @@ try {
   await page.getByText('Không đọc được lịch sử', { exact: true }).waitFor();
   const blockedInput = page.getByRole('textbox', { name: 'Tin nhắn' });
   await blockedInput.fill('Không gửi khi chưa đọc được lịch sử');
-  assert.equal(
-    await page.getByRole('button', { name: 'Gửi tin nhắn' }).isDisabled(),
-    true,
-  );
+  assert.equal(await page.locator('.compact-composer button').count(), 0);
   await blockedInput.press('Enter');
   assert.equal(
     await page.evaluate(() => window.calls.some((c) => c.command === 'chat')),
     false,
+  );
+  await page.goto('http://127.0.0.1:1420/?view=chat');
+  const longInput = page.getByRole('textbox', { name: 'Tin nhắn' });
+  await longInput.waitFor();
+  await page.evaluate(() => {
+    window.longReply = 'Đây là một câu trả lời dài. '.repeat(20);
+  });
+  await longInput.fill('Câu hỏi vừa');
+  await longInput.press('Enter');
+  await page
+    .getByText('Đây là một câu trả lời dài.', { exact: false })
+    .waitFor();
+  await page.waitForTimeout(200);
+  const medium = await page
+    .locator('.compact-stream')
+    .evaluate((el) => ({ height: el.clientHeight, full: el.scrollHeight }));
+  assert.ok(
+    medium.height > 220 && medium.full <= medium.height + 1,
+    'ordinary replies expand without scrolling or clipping',
+  );
+  await page.evaluate(() => {
+    window.testMaxHeight = 260;
+    window.longReply = 'Đây là một câu trả lời dài. '.repeat(150);
+  });
+  await page.waitForTimeout(200);
+  await longInput.fill('Câu hỏi dài');
+  await longInput.press('Enter');
+  await page
+    .getByText('Ctrl+Enter để xem toàn bộ câu trả lời', { exact: true })
+    .waitFor();
+  assert.equal(
+    await page
+      .locator('.compact-stream')
+      .evaluate((el) => getComputedStyle(el).overflowY),
+    'hidden',
+  );
+  assert.equal(
+    await page.locator('.compact-stream').evaluate((el) => el.scrollTop),
+    0,
+  );
+  await longInput.press('Control+Enter');
+  await page.waitForFunction(() =>
+    window.calls.some((c) => c.command === 'open_chat_in_main'),
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.calls
+          .find((c) => c.command === 'open_chat_in_main')
+          .args.draft.messages.at(-1).content,
+    ),
+    await page.evaluate(() => window.longReply),
   );
   assert.deepEqual(errors, []);
   console.log(

@@ -1,7 +1,6 @@
 <script lang="ts">
   import { locale, t } from '../lib/i18n';
   import { onMount, tick, onDestroy } from 'svelte';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen, emit } from '@tauri-apps/api/event';
   import { newId } from '@michiyo/shared/ids';
   import { marked } from 'marked';
@@ -43,6 +42,15 @@
   $: needsKey = /Chưa có API key cho claude/i.test(error);
   let job = '';
   let scroll: HTMLDivElement;
+  let compactOverflow = false;
+  function updateCompactOverflow() {
+    compactOverflow = !!(
+      compact &&
+      scroll &&
+      scroll.scrollHeight > scroll.clientHeight + 1
+    );
+  }
+  $: if (compact && messages) tick().then(updateCompactOverflow);
   let placement = 'left';
 
   // Mascot machine & companion state above input
@@ -52,51 +60,22 @@
   let ambientStep = 0;
   let atRight = false;
   let dockPosition = 0;
-  let dockWidth = 0;
-  let dockDistance = 0;
   let dockFrame = 0;
+  let entering = false;
+  let entryTimer: ReturnType<typeof setTimeout>;
+  function playEntry() {
+    clearTimeout(entryTimer);
+    entering = false;
+    if (compact || reducedMotion) return;
+    tick().then(() => {
+      entering = true;
+      entryTimer = setTimeout(() => (entering = false), 900);
+    });
+  }
   function stopDockMotion() {
     cancelAnimationFrame(dockFrame);
     mascotMachine.stopMotion();
     syncMascot();
-  }
-  function moveDock() {
-    if (
-      !mascotMachine.canMove ||
-      reducedMotion ||
-      !active ||
-      !config.autonomousMovement
-    )
-      return;
-    const start = dockPosition,
-      end = atRight ? 0 : 1;
-    atRight = !atRight;
-    const started = performance.now();
-    dockDistance = 0;
-    mascotMachine.setMotion('walk');
-    syncMascot();
-    const frame = (now: number) => {
-      if (
-        !mascotMachine.canMove ||
-        reducedMotion ||
-        !active ||
-        !config.autonomousMovement
-      ) {
-        stopDockMotion();
-        return;
-      }
-      const progress = Math.min(1, (now - started) / 4500);
-      dockPosition = start + (end - start) * progress;
-      dockDistance =
-        (Math.abs(dockPosition - start) * Math.max(0, dockWidth - 88) * 160) /
-        88;
-      if (progress < 1) dockFrame = requestAnimationFrame(frame);
-      else {
-        mascotMachine.stopMotion();
-        syncMascot();
-      }
-    };
-    dockFrame = requestAnimationFrame(frame);
   }
   let systemReduced = false;
   $: reducedMotion = config.reducedMotion || systemReduced;
@@ -142,11 +121,22 @@
   function resizeComposer() {
     if (!composer) return;
     if (compact) {
-      composer.style.height = '0px';
-      composer.style.height = `${Math.min(72, Math.max(28, composer.scrollHeight))}px`;
+      composer.style.height = '28px';
     } else {
       composer.style.height = 'auto';
       composer.style.height = `${Math.min(120, Math.max(28, composer.scrollHeight))}px`;
+    }
+  }
+
+  async function openFullChat() {
+    if (!desktop || busy) return;
+    try {
+      await call('open_chat_in_main', {
+        draft: { current: MAIN_CONVERSATION_ID, messages, input },
+      });
+      await call('close_chat');
+    } catch (e) {
+      error = String(e);
     }
   }
 
@@ -192,6 +182,7 @@
     let offFocus: undefined | (() => void);
     let offPlacement: undefined | (() => void);
     let offSecrets: undefined | (() => void);
+    let offHistory: undefined | (() => void);
     let observer: ResizeObserver | undefined;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let ambientTimer: ReturnType<typeof setInterval> | undefined;
@@ -217,8 +208,6 @@
         ambientTimer = setInterval(() => {
           ambientStep = (ambientStep + 1) % 3;
           ambientPose = (['idle', 'sit', 'wave'] as const)[ambientStep];
-          if (ambientStep === 0 && !reducedMotion && mascotMachine.canMove)
-            moveDock();
         }, 6000);
     };
     manageTimers = updateTimers;
@@ -227,22 +216,35 @@
 
     if (compact && desktop) {
       tick().then(() => {
-        const page = composer?.closest('.page');
+        const page = composer?.closest<HTMLElement>('.page');
         if (!page) return;
         observer = new ResizeObserver(() => {
+          updateCompactOverflow();
           clearTimeout(resizeTimer);
-          resizeTimer = setTimeout(
-            () =>
-              call('resize_chat', {
+          resizeTimer = setTimeout(async () => {
+            try {
+              const maxHeight = await call<number>('resize_chat', {
                 height: Math.ceil(page.getBoundingClientRect().height) + 4,
-              }).catch(() => {}),
-            60,
-          );
+              });
+              if (Number.isFinite(maxHeight) && maxHeight >= 40) {
+                page.style.setProperty(
+                  '--bubble-max-height',
+                  `${maxHeight - 4}px`,
+                );
+                await tick();
+                updateCompactOverflow();
+              }
+            } catch {
+              /* The window may have been closed. */
+            }
+          }, 60);
         });
         observer.observe(page);
+        if (scroll) observer.observe(scroll);
       });
     }
     focus();
+    if (!compact) playEntry();
 
     (async () => {
       if (!desktop) {
@@ -281,6 +283,21 @@
         error = String(e);
       }
 
+      offHistory = await listen('history-changed', async () => {
+        if (busy) return;
+        const before = messages;
+        try {
+          const conversations =
+            await call<{ id: string; messages: Message[] }[]>('history_list');
+          if (!busy && messages === before)
+            messages =
+              conversations.find((c) => c.id === MAIN_CONVERSATION_ID)
+                ?.messages || [];
+        } catch (e) {
+          error = String(e);
+        }
+      });
+
       off = await listen<{ id: string; text: string }>('chat-delta', (e) => {
         if (e.payload.id === job) {
           const follow =
@@ -295,7 +312,7 @@
           }
           mascotMachine.transition('talking');
           syncMascot();
-          if (follow)
+          if (!compact && follow)
             tick().then(() => scroll?.scrollTo(0, scroll.scrollHeight));
         }
       });
@@ -306,12 +323,14 @@
       };
       if (compact) {
         offFollow = await listen('ask-translation', take);
+        offFocus = await listen('chat-focus', focus);
         await take();
       }
       if (!compact) {
         offFocus = await listen('focus-composer', () => {
           takeShellDraft();
           focus();
+          playEntry();
         });
         await takeShellDraft();
       }
@@ -323,11 +342,13 @@
       offFocus?.();
       offPlacement?.();
       offSecrets?.();
+      offHistory?.();
       observer?.disconnect();
       clearInterval(mascotTimer);
       clearInterval(ambientTimer);
       cancelAnimationFrame(dockFrame);
       clearTimeout(resizeTimer);
+      clearTimeout(entryTimer);
       document.removeEventListener('visibilitychange', updateTimers);
       motionQuery.removeEventListener('change', motionChanged);
       manageTimers = () => {};
@@ -354,7 +375,7 @@
     job = newId();
     mascotMachine.transition('thinking');
     syncMascot();
-    tick().then(() => scroll?.scrollTo(0, scroll.scrollHeight));
+    if (!compact) tick().then(() => scroll?.scrollTo(0, scroll.scrollHeight));
 
     if (!desktop) {
       setTimeout(() => {
@@ -461,6 +482,7 @@
 <div
   class="messages chat-stream-container"
   class:compact-stream={compact}
+  class:compact-empty={compact && !visibleMessages.length && !busy}
   class:beside-left={compact && placement === 'left'}
   bind:this={scroll}
 >
@@ -504,7 +526,7 @@
                   ? 'Replying'
                   : 'Đang trả lời'}
               </span>
-            {:else}
+            {:else if !compact}
               <button
                 type="button"
                 aria-label="Sao chép câu trả lời"
@@ -587,6 +609,12 @@
   {/if}
 </div>
 
+{#if compact && compactOverflow}
+  <div class="compact-overflow" role="status">
+    {busy ? 'Đang trả lời…' : 'Ctrl+Enter để xem toàn bộ câu trả lời'}
+  </div>
+{/if}
+
 {#if noteStatus}
   <div class="toast-note" role="status">{noteStatus}</div>
 {/if}
@@ -636,7 +664,6 @@
 {#if !compact}
   <div
     class="companion-dock"
-    bind:clientWidth={dockWidth}
     role="region"
     aria-label="Bé bot Michiyo"
     class:reduced={reducedMotion}
@@ -660,11 +687,11 @@
         syncMascot();
       }}
     >
-      <div class="companion-frame">
+      <div class="companion-frame" class:entering>
+        {#if entering}<span class="entry-burst" aria-hidden="true"></span>{/if}
         {#if active}<Companion
             state={displayedPose}
             facing={atRight ? 1 : -1}
-            motionDistance={dockDistance}
             speed={config.animationSpeed}
             reduced={reducedMotion}
             skin={config.skin}
@@ -687,72 +714,75 @@
     bind:this={composer}
     aria-label={t('Tin nhắn', $locale)}
     bind:value={input}
+    wrap={compact ? 'off' : 'soft'}
+    title={compact
+      ? 'Enter để gửi · Esc để đóng · Ctrl+Enter để mở trong app'
+      : undefined}
     placeholder={compact
       ? 'Hỏi Michiyo…'
       : t('Nhập tin nhắn tâm sự hoặc câu hỏi cùng Michiyo…', $locale)}
     oninput={() => {
+      if (compact) input = input.replace(/[\r\n]+/g, ' ');
       resizeComposer();
       mascotMachine.transition('listening');
       syncMascot();
       if (desktop && !busy) emit('mascot-state', 'listening');
     }}
     onkeydown={(e) => {
+      if (compact && e.key === 'Escape') {
+        e.preventDefault();
+        if (desktop) call('close_chat').catch((e) => (error = String(e)));
+        return;
+      }
+      if (compact && e.key === 'Enter' && e.ctrlKey && !e.isComposing) {
+        e.preventDefault();
+        void openFullChat();
+        return;
+      }
+      if (compact && e.key === 'Enter' && e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         send();
       }
     }}></textarea>
 
-  <div class="composer-footer">
-    <div class="composer-buttons">
-      {#if busy}
-        <button
-          type="button"
-          class="stop-btn"
-          aria-label="Dừng trả lời"
-          onclick={() => call('stop_chat', { id: job })}
-        >
-          {compact ? '■' : '■ Dừng'}
-        </button>
-      {:else}
-        <button
-          type="submit"
-          class="primary send-btn"
-          aria-label="Gửi tin nhắn"
-          disabled={!input.trim() || !historyReady}
-        >
-          <span>{compact ? '↑' : 'Gửi'}</span>
-          {#if !compact}
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
-            </svg>
-          {/if}
-        </button>
-      {/if}
-      {#if compact}
-        <button
-          type="button"
-          aria-label="Mở trong app"
-          disabled={busy}
-          onclick={() =>
-            call('open_chat_in_main', {
-              draft: { current: MAIN_CONVERSATION_ID, messages, input },
-            }).catch((e) => (error = String(e)))}>↗</button
-        >
-        <button
-          type="button"
-          aria-label="Đóng trò chuyện"
-          onclick={() => desktop && getCurrentWindow().hide()}>×</button
-        >
-      {/if}
-    </div>
-  </div>
+  {#if !compact}<div class="composer-footer">
+      <div class="composer-buttons">
+        {#if busy}
+          <button
+            type="button"
+            class="stop-btn"
+            aria-label="Dừng trả lời"
+            onclick={() => call('stop_chat', { id: job })}
+          >
+            {compact ? '■' : '■ Dừng'}
+          </button>
+        {:else}
+          <button
+            type="submit"
+            class="primary send-btn"
+            aria-label="Gửi tin nhắn"
+            disabled={!input.trim() || !historyReady}
+          >
+            <span>{compact ? '↑' : 'Gửi'}</span>
+            {#if !compact}
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
+              </svg>
+            {/if}
+          </button>
+        {/if}
+      </div>
+    </div>{/if}
 </form>
 
 <style>
@@ -960,6 +990,13 @@
     border: 1px solid #e1e7e1;
     border-radius: 18px 18px 18px 4px;
   }
+  .compact-stream .thinking-bubble {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
   .dot {
     width: 6px;
     height: 6px;
@@ -1048,6 +1085,55 @@
     height: 88px !important;
     pointer-events: none;
     filter: drop-shadow(0 5px 12px rgba(45, 75, 55, 0.16));
+  }
+  .entry-burst {
+    position: absolute;
+    width: 62px;
+    height: 62px;
+    border: 4px solid #f4c777;
+    border-radius: 50%;
+    box-shadow:
+      0 0 0 8px #fff3d7,
+      0 0 18px #edbd7c;
+    pointer-events: none;
+    animation: entry-burst 650ms ease-out both;
+  }
+  .entering :global(canvas) {
+    animation: entry-appear 650ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes entry-burst {
+    0% {
+      opacity: 0;
+      transform: scale(0.15);
+    }
+    28% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.7);
+    }
+  }
+  @keyframes entry-appear {
+    0%,
+    20% {
+      opacity: 0;
+      transform: scale(0.2);
+    }
+    70% {
+      opacity: 1;
+      transform: scale(1.08);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .entry-burst,
+    .entering :global(canvas) {
+      animation: none;
+    }
   }
   .companion-frame :global(.sprite) {
     width: 88px;
@@ -1148,7 +1234,28 @@
 
   /* Compact mode overrides */
   .compact-composer {
-    padding: 8px 10px;
+    padding: 0 2px 3px;
+    align-items: center;
+    border: 0;
+    border-bottom: 1px solid rgba(235, 244, 238, 0.65);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .compact-composer:focus-within {
+    border-color: rgba(235, 244, 238, 0.9);
+    box-shadow: none;
+  }
+  .compact-composer textarea {
+    line-height: 20px;
+    padding: 4px 2px;
+    color: #f5faf7;
+    caret-color: #f5faf7;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  }
+  .compact-composer textarea::placeholder {
+    color: #d5dfd8;
+    opacity: 0.8;
   }
   @media (prefers-reduced-motion: reduce) {
     .companion-touch-zone {
@@ -1160,6 +1267,18 @@
   }
   .compact-stream {
     padding: 6px;
+    overflow: hidden;
+  }
+  .compact-stream.compact-empty {
+    display: none;
+  }
+  .compact-overflow {
+    flex: none;
+    padding: 4px 9px;
+    border-radius: 6px;
+    background: #fafaf7;
+    color: #59664f;
+    font-size: 11px;
   }
 
   /* Toast & Notices */

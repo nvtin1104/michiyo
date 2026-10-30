@@ -413,7 +413,9 @@ pub async fn open_chat_in_main(
         .pending_shell_chat_draft
         .lock()
         .map_err(|_| "Không mở được cuộc trò chuyện")? = Some(draft);
-    open_main_impl(app, "chat".into())
+    open_main_impl(app.clone(), "chat".into())?;
+    let _ = app.emit_to("main", "focus-composer", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -485,6 +487,23 @@ pub(crate) fn open_main_impl(app: tauri::AppHandle, route: String) -> Result<(),
     };
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    notify_chat_visibility(&app);
+    Ok(())
+}
+
+pub(crate) fn notify_chat_visibility(app: &tauri::AppHandle) {
+    let visible = ["chat", "main"].iter().any(|label| {
+        app.get_webview_window(label).is_some_and(|window| window.is_visible().unwrap_or(false))
+    });
+    let _ = app.emit_to("mascot", "chat-visible", visible);
+}
+
+#[tauri::command]
+pub fn close_chat(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("chat") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    notify_chat_visibility(&app);
     Ok(())
 }
 
@@ -519,6 +538,7 @@ pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(
     position_panel(app, &window, cursor || label == "menu")?;
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    if label == "chat" { notify_chat_visibility(app); }
     if label == "menu" {
         let _ = app.emit_to("menu", "menu-focus", ());
     }
@@ -528,13 +548,16 @@ pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(
     Ok(())
 }
 #[tauri::command]
-pub fn resize_chat(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+pub fn resize_chat(app: tauri::AppHandle, height: f64) -> Result<f64, String> {
     if !height.is_finite() {
         return Err("Chiều cao không hợp lệ".into());
     }
     if let Some(window) = app.get_webview_window("chat") {
-        let height = height.clamp(40., 304.);
         let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let max_height = window.current_monitor().map_err(|e| e.to_string())?
+            .map(|monitor| monitor.work_area().size.height as f64 / scale)
+            .unwrap_or(720.).max(40.);
+        let height = height.clamp(40., max_height);
         let size = window.inner_size().map_err(|e| e.to_string())?;
         if (size.height as f64 - height * scale).abs() > 1.
             || (size.width as f64 - 320. * scale).abs() > 1.
@@ -544,8 +567,9 @@ pub fn resize_chat(app: tauri::AppHandle, height: f64) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
         }
         position_panel(&app, &window, false)?;
+        return Ok(max_height);
     }
-    Ok(())
+    Ok(720.)
 }
 #[tauri::command]
 pub async fn mascot_menu(app: tauri::AppHandle) -> Result<(), String> {
@@ -567,6 +591,7 @@ pub async fn menu_action(app: tauri::AppHandle, action: String) -> Result<(), St
             if let Some(w) = app.get_webview_window("chat") {
                 let _ = w.hide();
             }
+            notify_chat_visibility(&app);
             Ok(())
         }
         "quit" => {
@@ -576,7 +601,7 @@ pub async fn menu_action(app: tauri::AppHandle, action: String) -> Result<(), St
         _ => Err("Thao tác không hợp lệ".into()),
     }
 }
-fn position_panel(
+pub(crate) fn position_panel(
     app: &tauri::AppHandle,
     window: &tauri::WebviewWindow,
     cursor: bool,
@@ -645,6 +670,7 @@ fn position_panel(
             } else {
                 pet_left - gap - ws.width as f64
             };
+            // Align the composer's bottom with the mascot's feet; replies grow upward.
             let y = pet_bottom - ws.height as f64;
             window
                 .set_position(tauri::PhysicalPosition::new(

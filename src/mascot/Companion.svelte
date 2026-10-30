@@ -9,6 +9,7 @@
   export let motionDistance: number | undefined = undefined;
   export let pointer = { x: 80, y: 80 };
   export let tracking = true;
+  export let eyeTracking = false;
 </script>
 
 <Mascot
@@ -19,5 +20,6 @@
   {reduced}
   {pointer}
   {tracking}
+  {eyeTracking}
   {skin}
 />

@@ -612,7 +612,7 @@
         >
         <label class="check"
           ><input type="checkbox" bind:checked={config.clickOpensChat} />Click
-          mascot để mở chat</label
+          mascot để mở bong bóng chat</label
         >
         <p class="muted">
           Giữ trên đầu để vuốt ve; kéo từ ngực trở lên để nhấc bổng, kéo phần

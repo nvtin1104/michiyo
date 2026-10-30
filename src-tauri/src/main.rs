@@ -59,6 +59,7 @@ fn main() {
             commands::ai_summarize,
             commands::ai_suggest_actions,
             commands::open_panel,
+            commands::close_chat,
             commands::open_main,
             commands::open_translation_in_main,
             commands::open_chat_in_main,
@@ -233,6 +234,9 @@ fn main() {
                         std::thread::sleep(std::time::Duration::from_millis(160));
                         if h.state::<commands::Runtime>().move_generation.load(Ordering::SeqCst) != generation || commands::motion::mascot_mouse_down() { continue; }
                         let _ = commands::save_mascot_position(h.clone());
+                        if let Some(chat) = h.get_webview_window("chat") {
+                            if chat.is_visible().unwrap_or(false) { let _ = commands::position_panel(&h, &chat, false); }
+                        }
                         let runtime = h.state::<commands::Runtime>();
                         runtime.move_save_active.store(false, Ordering::SeqCst);
                         if runtime.move_generation.load(Ordering::SeqCst) == generation || runtime.move_save_active.swap(true, Ordering::SeqCst) { break; }
@@ -242,6 +246,9 @@ fn main() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = w.hide();
+                if w.label() == "chat" || w.label() == "main" {
+                    commands::notify_chat_visibility(w.app_handle());
+                }
                 if w.label() == "mascot" {
                     let _ = w.app_handle().emit_to("mascot", "mascot-visible", false);
                 }

@@ -7,6 +7,7 @@ import {
   strideFrame,
   chooseRest,
   hasSurface,
+  frameOffset,
   type Scene,
 } from './motion';
 import { MascotMachine } from './machine';
@@ -19,6 +20,15 @@ const scene: Scene = {
   surfaces: [],
 };
 describe('motion', () => {
+  it('mirrors frame offsets with facing and ignores invalid metadata', () => {
+    const offsets = { '0': { x: -40, y: 5 } };
+    expect(frameOffset(offsets, 0, 320, 320, 1)).toEqual({ x: -16, y: 2 });
+    expect(frameOffset(offsets, 0, 320, 320, -1)).toEqual({ x: 16, y: 2 });
+    expect(
+      frameOffset({ '0': { x: Infinity, y: 1000 } }, 0, 320, 320, 1),
+    ).toEqual({ x: 0, y: 0 });
+    expect(frameOffset(undefined, 0, 320, 320, 1)).toEqual({ x: 0, y: 0 });
+  });
   it('advances stride by distance and wraps at a full cycle', () => {
     expect([0, 8, 16, 24, 32].map((d) => strideFrame(d, 32, 4))).toEqual([
       0, 1, 2, 3, 0,
