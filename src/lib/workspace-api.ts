@@ -34,7 +34,11 @@ export type SyncStatusInfo = {
 export interface WorkspaceAdapter {
   isAvailable(): boolean;
   notesList(query?: string): Promise<Note[]>;
-  eventsRange(from: number, until: number, tzOffset: number): Promise<TodayAgendaItem[]>;
+  eventsRange(
+    from: number,
+    until: number,
+    tzOffset: number,
+  ): Promise<TodayAgendaItem[]>;
   habitsList(today: string): Promise<TodayHabitItem[]>;
   habitCheckIn(id: string, date: string, done: boolean): Promise<void>;
   remindersPending(): Promise<DueReminder[]>;

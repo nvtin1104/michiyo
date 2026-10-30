@@ -37,12 +37,25 @@ try {
         if (command === 'plugin:store|get') return [null, false];
         if (command === 'plugin:event|listen') return 1;
         if (command === 'notes_list') return [note];
-        if (command === 'ai_summarize') return '- Họp lúc 9h\n- Đọc sách hằng ngày';
+        if (command === 'ai_summarize')
+          return '- Họp lúc 9h\n- Đọc sách hằng ngày';
         if (command === 'ai_suggest_actions') {
           window.__nowLocal = args.nowLocal;
           return [
-            { kind: 'event', title: 'Họp', body: null, when: '2026-11-02T09:00', frequency: null },
-            { kind: 'habit', title: 'Đọc sách', body: null, when: null, frequency: 'daily' },
+            {
+              kind: 'event',
+              title: 'Họp',
+              body: null,
+              when: '2026-11-02T09:00',
+              frequency: null,
+            },
+            {
+              kind: 'habit',
+              title: 'Đọc sách',
+              body: null,
+              when: null,
+              frequency: 'daily',
+            },
           ];
         }
         if (['events_save', 'habits_save', 'notes_save'].includes(command)) {
@@ -58,7 +71,10 @@ try {
 
   await page.getByRole('button', { name: 'Gợi ý hành động' }).click();
   await page.getByRole('list', { name: 'Gợi ý hành động' }).waitFor();
-  assert.match(await page.evaluate(() => window.__nowLocal), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  assert.match(
+    await page.evaluate(() => window.__nowLocal),
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/,
+  );
   // Suggestions alone write nothing.
   assert.equal(await page.evaluate(() => window.__writes.length), 0);
 
@@ -81,7 +97,9 @@ try {
   // Inserting only fills the editor; the note is saved when the user presses Lưu.
   assert.equal(await page.evaluate(() => window.__writes.length), 1);
   assert.deepEqual(errors, []);
-  console.log('PASS: AI summary insert and action suggestions require explicit confirmation before any write (mock IPC).');
+  console.log(
+    'PASS: AI summary insert and action suggestions require explicit confirmation before any write (mock IPC).',
+  );
 } finally {
   await browser.close();
 }

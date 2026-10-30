@@ -17,7 +17,9 @@
       <h1>Một ngày cùng Michiyo</h1>
     </div>
   </header>
-  <p>Quản lý ghi chú, lịch trình, thói quen và hoạt động cùng trợ lý của bạn.</p>
+  <p>
+    Quản lý ghi chú, lịch trình, thói quen và hoạt động cùng trợ lý của bạn.
+  </p>
   <div class="cards">
     <button onclick={() => onNavigate('chat')}>✦ Bắt đầu trò chuyện</button>
     <button onclick={() => onNavigate('notes')}>📝 Mở ghi chú</button>
@@ -47,7 +49,8 @@
           <span>{habit.title} <small>🔥 {habit.streak}</small></span>
           <button
             aria-label={`Check-in ${habit.title}`}
-            onclick={() => onCheckIn(habit)}>✓</button>
+            onclick={() => onCheckIn(habit)}>✓</button
+          >
         </p>
       {:else}
         <p class="muted">Đã hoàn thành hết hoặc chưa có thói quen.</p>

@@ -19,7 +19,9 @@ await page.getByRole('button', { name: 'Cài đặt', exact: true }).click();
 assert.equal(await page.locator('.shell-chat-container').isVisible(), false);
 assert.equal(await page.locator('.shell-settings').isVisible(), true);
 assert.equal(
-  await page.locator('.topbar-nav').evaluate((el) => getComputedStyle(el).flexDirection),
+  await page
+    .locator('.topbar-nav')
+    .evaluate((el) => getComputedStyle(el).flexDirection),
   'row',
 );
 await page.locator('nav button').filter({ hasText: 'API' }).click();
@@ -77,7 +79,10 @@ await page.getByRole('heading', { name: 'Ghi chú' }).waitFor();
 await page.getByRole('button', { name: '← Trò chuyện' }).click();
 const draft = page.getByRole('textbox', { name: 'Tin nhắn' });
 assert.equal(await page.locator('.shell-settings').isVisible(), false);
-assert.equal(await page.locator('.shell-page[hidden]').first().isVisible(), false);
+assert.equal(
+  await page.locator('.shell-page[hidden]').first().isVisible(),
+  false,
+);
 await draft.fill('Bản nháp 1v1 gửi Michiyo');
 assert.equal(await page.evaluate(() => location.hash), '#/chat');
 
@@ -85,13 +90,22 @@ assert.equal(await page.evaluate(() => location.hash), '#/chat');
 await page.getByRole('button', { name: 'Không gian làm việc' }).click();
 await page.getByRole('button', { name: 'Đóng thanh bên' }).click();
 assert.equal(
+  await page.getByRole('navigation', { name: 'Điều hướng chính' }).isVisible(),
+  true,
+);
+assert.equal(
+  await page
+    .locator('.shell')
+    .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ')[0]),
+  '64px',
+);
+assert.equal(
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Ghi chú' })
     .isVisible(),
   true,
 );
-assert.equal(await page.locator('.shell').evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ')[0]), '64px');
-assert.equal(await page.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Ghi chú' }).isVisible(), true);
 await page.getByRole('button', { name: 'Mở thanh bên' }).click();
 await page.getByRole('button', { name: '← Trò chuyện' }).click();
 assert.equal(await draft.inputValue(), 'Bản nháp 1v1 gửi Michiyo');
@@ -100,10 +114,19 @@ assert.equal(await draft.inputValue(), 'Bản nháp 1v1 gửi Michiyo');
 await page.setViewportSize({ width: 480, height: 600 });
 await page.getByRole('button', { name: 'Cài đặt', exact: true }).click();
 const settingsNav = page.getByRole('navigation', { name: 'Nhóm cài đặt' });
-assert.equal(await settingsNav.evaluate((el) => getComputedStyle(el).flexDirection), 'row');
+assert.equal(
+  await settingsNav.evaluate((el) => getComputedStyle(el).flexDirection),
+  'row',
+);
 await settingsNav.getByRole('button', { name: 'API', exact: true }).click();
-assert.equal(await page.locator('.settings-content').getAttribute('aria-label'), 'API');
-assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+assert.equal(
+  await page.locator('.settings-content').getAttribute('aria-label'),
+  'API',
+);
+assert.equal(
+  await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+  true,
+);
 
 await page.goto('http://127.0.0.1:1420/?view=mascot');
 await page.locator('canvas').waitFor();

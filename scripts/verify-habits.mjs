@@ -76,7 +76,10 @@ try {
   await page.getByRole('button', { name: 'Lưu', exact: true }).click();
   await page.getByText('4 lần mỗi tuần').waitFor();
   assert.equal(await page.evaluate(() => window.__saved.frequency), 'weekly:4');
-  assert.match(await page.evaluate(() => window.__lastToday), /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(
+    await page.evaluate(() => window.__lastToday),
+    /^\d{4}-\d{2}-\d{2}$/,
+  );
 
   const toggle = page.getByRole('button', { name: 'Check-in Đọc sách' });
   await toggle.click();
@@ -90,7 +93,9 @@ try {
   await page.getByRole('button', { name: 'Xóa', exact: true }).click();
   await page.getByText('Chưa có thói quen nào').waitFor();
   assert.deepEqual(errors, []);
-  console.log('PASS: habits create, check-in toggle, streak display and delete (mock IPC).');
+  console.log(
+    'PASS: habits create, check-in toggle, streak display and delete (mock IPC).',
+  );
 } finally {
   await browser.close();
 }

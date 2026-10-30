@@ -40,6 +40,41 @@ try {
           window.__target = args.target;
           return ['llama3', 'phi3'];
         }
+        if (command === 'local_status') {
+          return {
+            online: true,
+            baseUrl: 'http://127.0.0.1:11434',
+            version: '0.6.2',
+            message: null,
+            installedModels: window.__pulledGemma
+              ? [
+                  {
+                    name: 'gemma3:4b',
+                    sizeBytes: 3300000000,
+                    modifiedAt: '2026-10-30T10:00:00Z',
+                    family: 'gemma3',
+                    parameterSize: '4.3B',
+                    quantization: 'Q4_K_M',
+                  },
+                ]
+              : [],
+            activePull: null,
+            recommendedModels: [],
+          };
+        }
+        if (command === 'local_pull_model') {
+          window.__pulledModel = args.model;
+          window.__pulledGemma = true;
+          return {
+            model: args.model,
+            status: 'completed',
+            phase: 'Đã cài xong',
+            completedBytes: 3300000000,
+            totalBytes: 3300000000,
+            percent: 100,
+            error: null,
+          };
+        }
         return null;
       },
     };
@@ -66,18 +101,37 @@ try {
   await page.getByRole('button', { name: 'Kiểm tra kết nối' }).click();
   await page.getByText('Tìm thấy 2 model').waitFor();
   assert.equal(await page.evaluate(() => window.__target), 'local');
+  await page.getByText('● Đang chạy (v0.6.2)').waitFor();
 
-  const source = page.getByRole('combobox', { name: 'Nguồn model', exact: true });
-  await source.press('ArrowDown');
-  await page.getByRole('option', { name: 'Model Cloudflare' }).click();
+  // Pull recommended Google Gemma model (gemma3:4b) and select it
+  const gemmaRow = page
+    .locator('.local-model-row')
+    .filter({ hasText: 'gemma3:4b' });
+  await gemmaRow.getByRole('button', { name: 'Tải về' }).click();
+  await page.getByText('Đã cài xong gemma3:4b').waitFor();
+  assert.equal(await page.evaluate(() => window.__pulledModel), 'gemma3:4b');
+  await gemmaRow.getByRole('button', { name: 'Chọn dùng' }).click();
+  await page.getByText('Đã lưu thay đổi').waitFor();
+  const savedAfterSelect = await page.evaluate(() => window.__saved.at(-1));
+  assert.equal(savedAfterSelect.localModel, 'gemma3:4b');
+
+  await page.getByRole('tab', { name: 'Model Cloudflare' }).click();
   await page.getByLabel('Địa chỉ Michiyo Cloud').fill('http://127.0.0.1:8787');
   await page.getByLabel('Địa chỉ Michiyo Cloud').press('Tab');
   await page.getByLabel('Mã ghép nối').fill('ABCD2345');
   await page.getByRole('button', { name: 'Ghép nối' }).click();
   await page.getByText('Đã ghép nối với Michiyo Cloud').waitFor();
-  assert.deepEqual(await page.evaluate(() => window.__pair), { url: 'http://127.0.0.1:8787', code: 'ABCD2345' });
+  assert.deepEqual(await page.evaluate(() => window.__pair), {
+    url: 'http://127.0.0.1:8787',
+    code: 'ABCD2345',
+  });
   await page.getByText('● Đã ghép nối').waitFor();
 
+  await page.getByRole('tab', { name: /Model ngoài/ }).click();
+  await page.getByRole('button', { name: 'OpenAI-compatible' }).click();
+  await page.getByLabel('Địa chỉ API').waitFor();
+
+  await page.getByRole('tab', { name: /Google Local/ }).click();
   await page.getByLabel('Địa chỉ cục bộ').fill('http://example.com/v1');
   await page.getByLabel('Địa chỉ cục bộ').press('Tab');
   await page.getByText('cần HTTPS hoặc localhost').waitFor();

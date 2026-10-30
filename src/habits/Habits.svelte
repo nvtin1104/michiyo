@@ -73,7 +73,8 @@
   async function refresh() {
     if (!desktop) return;
     try {
-      habits = (await call<Habit[]>('habits_list', { today: localDate() })) || [];
+      habits =
+        (await call<Habit[]>('habits_list', { today: localDate() })) || [];
     } catch (e) {
       error = String(e);
     }
@@ -135,7 +136,9 @@
   </div>
   <button onclick={() => edit(null)}>+ Thói quen mới</button>
 </header>
-{#if !desktop}<p class="muted">Mở ứng dụng desktop để sử dụng thói quen.</p>{/if}
+{#if !desktop}<p class="muted">
+    Mở ứng dụng desktop để sử dụng thói quen.
+  </p>{/if}
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 {#if creating}
   <section class="habit-form" aria-label="Thói quen">
@@ -205,9 +208,7 @@
         >
       </div>
       <div class="heat" aria-hidden="true">
-        {#each heat(habit.dates) as cell}<i
-            class:on={cell.on}
-            title={cell.date}
+        {#each heat(habit.dates) as cell}<i class:on={cell.on} title={cell.date}
           ></i>{/each}
       </div>
     </li>

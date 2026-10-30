@@ -104,7 +104,8 @@
       <span
         ><b>{labels[item.kind]}</b>
         {item.title}{#if item.when}
-          <small>{new Date(item.when).toLocaleString()}</small>{/if}{#if item.frequency}
+          <small>{new Date(item.when).toLocaleString()}</small
+          >{/if}{#if item.frequency}
           <small>{item.frequency}</small>{/if}</span
       >
       <button
@@ -113,8 +114,7 @@
         onclick={() => accept(item)}>Thêm</button
       ><button
         aria-label={`Bỏ qua ${item.title}`}
-        onclick={() => (items = items.filter((i) => i !== item))}
-        >Bỏ qua</button
+        onclick={() => (items = items.filter((i) => i !== item))}>Bỏ qua</button
       >
     </li>
   {/each}

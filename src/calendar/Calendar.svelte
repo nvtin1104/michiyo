@@ -91,7 +91,9 @@
   async function refresh() {
     if (!desktop) return;
     try {
-      call('set_timezone', { offset: -new Date().getTimezoneOffset() }).catch(() => {});
+      call('set_timezone', { offset: -new Date().getTimezoneOffset() }).catch(
+        () => {},
+      );
       items = await call<Item[]>('events_range', {
         from: from.getTime(),
         until: until.getTime(),
@@ -174,7 +176,7 @@
       });
       await refresh();
     });
-  $: from, until, refresh();
+  $: (from, until, refresh());
   onMount(() => {
     let off: (() => void) | undefined;
     let disposed = false;
@@ -228,7 +230,13 @@
         ></select
       ></label
     >
-    <label>{kind === 'todo' ? 'Hạn' : 'Ngày'}<input type="date" aria-label="Ngày" bind:value={date} /></label>
+    <label
+      >{kind === 'todo' ? 'Hạn' : 'Ngày'}<input
+        type="date"
+        aria-label="Ngày"
+        bind:value={date}
+      /></label
+    >
     <label
       >{kind === 'todo' ? 'Giờ' : 'Bắt đầu'}<input
         type="time"
@@ -270,8 +278,7 @@
         disabled={saving || !title.trim() || !date}
         onclick={saveItem}>Lưu</button
       ><button disabled={saving} onclick={() => (open = false)}>Hủy</button
-      >{#if editing}<button disabled={saving} onclick={remove}>Xóa</button
-        >{/if}
+      >{#if editing}<button disabled={saving} onclick={remove}>Xóa</button>{/if}
     </div>
   </section>
 {/if}
@@ -316,9 +323,8 @@
         onchange={() => toggleDone(item)}
       />{/if}
     <button class="link" onclick={() => edit(item)}
-      >{timeKey(new Date(item.occurrence_start))} {item.title}{item.rrule
-        ? ' ↻'
-        : ''}</button
+      >{timeKey(new Date(item.occurrence_start))}
+      {item.title}{item.rrule ? ' ↻' : ''}</button
     >
   </span>
 {/snippet}
@@ -331,7 +337,10 @@
     gap: 8px;
     margin: 4px 0 20px;
   }
-  .bar strong { color: #2d4135; font-size: 14px; }
+  .bar strong {
+    color: #2d4135;
+    font-size: 14px;
+  }
   .views {
     margin-left: auto;
     display: inline-flex;

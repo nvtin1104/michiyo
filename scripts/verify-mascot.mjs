@@ -186,11 +186,25 @@ try {
   );
   assert.equal(await page.locator('.compact-stream').isVisible(), false);
   assert.equal(await page.locator('.compact-composer button').count(), 0);
-  const composerStyle = await page.locator('.compact-composer').evaluate((el) => {
-    const style = getComputedStyle(el);
-    return { background: style.backgroundColor, top: style.borderTopWidth, bottom: style.borderBottomWidth, radius: style.borderRadius, shadow: style.boxShadow };
+  const composerStyle = await page
+    .locator('.compact-composer')
+    .evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        background: style.backgroundColor,
+        top: style.borderTopWidth,
+        bottom: style.borderBottomWidth,
+        radius: style.borderRadius,
+        shadow: style.boxShadow,
+      };
+    });
+  assert.deepEqual(composerStyle, {
+    background: 'rgba(0, 0, 0, 0)',
+    top: '0px',
+    bottom: '1px',
+    radius: '0px',
+    shadow: 'none',
   });
-  assert.deepEqual(composerStyle, { background: 'rgba(0, 0, 0, 0)', top: '0px', bottom: '1px', radius: '0px', shadow: 'none' });
   await page.addStyleTag({ content: 'html{background:#242424!important}' });
   await page.screenshot({ path: 'artifacts/chat-empty.png' });
   await input.fill('Bản nháp');

@@ -162,7 +162,9 @@
                 ? 'Đã trò chuyện'
                 : item.kind === 'translation'
                   ? 'Đã dịch văn bản'
-                  : (habitLabels[item.kind] ?? item.kind)}{item.data?.title ? ` · ${item.data.title}` : ''}
+                  : (habitLabels[item.kind] ?? item.kind)}{item.data?.title
+            ? ` · ${item.data.title}`
+            : ''}
         </p>
       </div>
       <button
