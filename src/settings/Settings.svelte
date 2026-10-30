@@ -1,6 +1,15 @@
 <script lang="ts">
   import { locale, t } from '../lib/i18n';
-  import { call, desktop, type Config, defaults } from '../lib/api';
+  import {
+    call,
+    desktop,
+    type Config,
+    defaults,
+    type LocalPullProgress,
+    type LocalRecommendedModel,
+    type LocalServerStatus,
+  } from '../lib/api';
+  import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import Select from '../lib/Select.svelte';
   const choices = (values: string[]) =>
@@ -91,21 +100,198 @@
       status = String(e);
     }
   }
+  const defaultGemmaModels: LocalRecommendedModel[] = [
+    {
+      id: 'gemma3:4b',
+      label: 'Google Gemma 3 · 4B',
+      sizeHint: '~3,3 GB',
+      ramHint: 'RAM ≥ 8 GB',
+      description:
+        'Khuyên dùng cho chat, tóm tắt và dịch tiếng Việt trên máy cá nhân.',
+      recommended: true,
+    },
+    {
+      id: 'gemma3:1b',
+      label: 'Google Gemma 3 · 1B',
+      sizeHint: '~815 MB',
+      ramHint: 'RAM ≥ 4 GB',
+      description: 'Siêu nhẹ, phản hồi tức thì trên máy cấu hình thấp.',
+      recommended: false,
+    },
+    {
+      id: 'gemma3:12b',
+      label: 'Google Gemma 3 · 12B',
+      sizeHint: '~8,1 GB',
+      ramHint: 'RAM ≥ 16 GB',
+      description:
+        'Chất lượng suy luận và dịch thuật cao cho máy có GPU/RAM lớn.',
+      recommended: false,
+    },
+    {
+      id: 'gemma2:9b',
+      label: 'Google Gemma 2 · 9B',
+      sizeHint: '~5,4 GB',
+      ramHint: 'RAM ≥ 12 GB',
+      description: 'Bản ổn định của Google, cân bằng tốc độ và độ chính xác.',
+      recommended: false,
+    },
+  ];
+  let localServer: LocalServerStatus | null = null;
+  let pullProgress: LocalPullProgress | null = null;
+  let customPullModel = '';
+  let aiTab: 'local' | 'external' | 'cloudflare' =
+    config.modelSource === 'cloudflare'
+      ? 'cloudflare'
+      : config.mode === 'offline' || config.chatProvider === 'local'
+        ? 'local'
+        : 'local';
+
+  function selectAiTab(next: 'local' | 'external' | 'cloudflare') {
+    aiTab = next;
+    if (next === 'cloudflare') {
+      config.modelSource = 'cloudflare';
+      changed();
+    } else if (next === 'external') {
+      config.modelSource = 'external';
+      if (config.chatProvider === 'local') {
+        config.chatProvider = 'claude';
+      }
+      changed();
+    } else if (next === 'local') {
+      config.modelSource = 'external';
+      if (config.localModel.trim()) {
+        config.chatProvider = 'local';
+        changed();
+      }
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (!bytes || bytes <= 0) return '0 MB';
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return `${gb.toFixed(1).replace('.', ',')} GB`;
+    const mb = bytes / (1024 * 1024);
+    return `${Math.round(mb)} MB`;
+  }
+
+  async function loadLocalStatus() {
+    if (!desktop) return;
+    try {
+      const st = await call<LocalServerStatus | null>('local_status');
+      if (st && typeof st === 'object') {
+        localServer = st;
+        if (st.activePull) pullProgress = st.activePull;
+        if (st.installedModels?.length) {
+          models.local = [
+            ...new Set([
+              ...models.local,
+              ...st.installedModels.map((m) => m.name),
+            ]),
+          ];
+        }
+      }
+    } catch {
+      // Ignore background probe errors so manual check remains primary
+    }
+  }
+
   async function loadModels(target: 'external' | 'local') {
     try {
       await save();
-      models[target] = await call<string[]>('ai_models', { target });
+      const list = await call<string[]>('ai_models', { target });
+      models[target] = Array.isArray(list) ? list : [];
+      if (target === 'local') {
+        await loadLocalStatus();
+      }
       status = `Tìm thấy ${models[target].length} model`;
+    } catch (e) {
+      if (target === 'local') await loadLocalStatus();
+      status = String(e);
+    }
+  }
+
+  async function pullLocalModel(modelName: string) {
+    const trimmed = modelName.trim();
+    if (!trimmed) {
+      status = 'Hãy nhập hoặc chọn tên model cần tải';
+      return;
+    }
+    try {
+      await save();
+      pullProgress = {
+        model: trimmed,
+        status: 'pulling',
+        phase: 'Đang kết nối máy chủ Ollama…',
+        completedBytes: 0,
+        totalBytes: 0,
+        percent: 0,
+        error: null,
+      };
+      status = `Đang tải ${trimmed}…`;
+      const done = await call<LocalPullProgress>('local_pull_model', {
+        model: trimmed,
+      });
+      if (done) pullProgress = done;
+      await loadLocalStatus();
+      if (!done || done.status === 'completed') {
+        if (!config.localModel.trim()) {
+          config.localModel = trimmed;
+          await save();
+        }
+        status = `Đã cài xong ${trimmed}`;
+        if (customPullModel.trim() === trimmed) customPullModel = '';
+      } else if (done.status === 'cancelled') {
+        status = `Đã huỷ tải ${trimmed}`;
+      }
+    } catch (e) {
+      status = String(e);
+      await loadLocalStatus();
+    }
+  }
+
+  async function cancelLocalPull() {
+    try {
+      const res = await call<LocalPullProgress | null>('local_cancel_pull');
+      if (res) pullProgress = res;
+      status = 'Đã huỷ tải model';
     } catch (e) {
       status = String(e);
     }
   }
+
+  async function deleteLocalModel(modelName: string) {
+    try {
+      await call('local_delete_model', { model: modelName });
+      if (config.localModel === modelName) {
+        config.localModel = '';
+        await save();
+      }
+      models.local = models.local.filter((m) => m !== modelName);
+      await loadLocalStatus();
+      status = `Đã xoá model ${modelName}`;
+    } catch (e) {
+      status = String(e);
+    }
+  }
+
+  $: recommendedList = localServer?.recommendedModels?.length
+    ? localServer.recommendedModels
+    : defaultGemmaModels;
+  $: installedMap = new Map(
+    (localServer?.installedModels ?? []).map((m) => [m.name, m]),
+  );
+  $: extraInstalledModels = (localServer?.installedModels ?? []).filter(
+    (m) => !recommendedList.some((r) => r.id === m.name),
+  );
+
   let show = false;
   let stored: Record<string, boolean> = {};
   let dirtyTimer: ReturnType<typeof setTimeout>;
   let skins = ['reze', 'moon-gardener'];
   let skinDirectory = '';
   onMount(() => {
+    let offPull: (() => void) | undefined;
+    let disposed = false;
     if (desktop) {
       call<Record<string, boolean>>('secret_status').then((v) => (stored = v));
       call<{ names: string[]; directory: string }>('list_skins').then((v) => {
@@ -118,8 +304,18 @@
         ];
         skinDirectory = v.directory;
       });
+      listen<LocalPullProgress>('local-pull-progress', (e) => {
+        pullProgress = e.payload;
+        if (e.payload.status === 'completed') {
+          loadLocalStatus();
+        }
+      }).then((f) => (disposed ? f() : (offPull = f)));
     }
-    return () => clearTimeout(dirtyTimer);
+    return () => {
+      disposed = true;
+      offPull?.();
+      clearTimeout(dirtyTimer);
+    };
   });
   function changed() {
     clearTimeout(dirtyTimer);
@@ -145,12 +341,11 @@
 </script>
 
 <div class="settings-shell">
-  <header class="settings-header">
-    <h1>{t('Cài đặt', $locale)}</h1>
-    <span>{t('Tùy chỉnh trải nghiệm của bạn', $locale)}</span>
-  </header>
   <div class="settings-layout">
     <nav aria-label="Nhóm cài đặt">
+      <header class="settings-header">
+        <h1>{t('Cài đặt', $locale)}</h1>
+      </header>
       {#each ['Chung', 'API', 'AI', 'Đồng bộ', 'Chat', 'Dịch', 'Phím tắt', 'Giao diện'] as name}<button
           class:active={tab === name}
           onclick={() => (tab = name)}>{t(name, $locale)}</button
@@ -161,36 +356,57 @@
       aria-label={t(tab, $locale)}
       onchange={changed}
     >
-      <h2>{t(tab, $locale)}</h2>
-      {#if tab === 'Chung'}<label
-          >{t('Ngôn ngữ giao diện', $locale)}<Select
-            label={t('Ngôn ngữ giao diện', $locale)}
-            bind:value={config.locale}
-            options={[
-              { value: 'vi', label: 'Tiếng Việt' },
-              { value: 'en', label: 'English' },
-            ]}
-            onchange={changed}
-          /></label
-        ><label class="check"
-          ><input type="checkbox" bind:checked={config.autostart} />{t(
-            'Khởi động cùng hệ thống',
-            $locale,
-          )}</label
-        ><label
-          >{t('Kích thước mascot', $locale)}<Select
-            label={t('Kích thước mascot', $locale)}
-            value={String(config.scale)}
-            options={[1, 2, 3].map((value) => ({
-              value: String(value),
-              label: `${value}×`,
-            }))}
-            onchange={(value) => {
-              config.scale = Number(value);
-              changed();
-            }}
-          /></label
-        ><label
+      {#if tab === 'Chung'}<div class="columns">
+          <label
+            >{t('Ngôn ngữ giao diện', $locale)}<Select
+              label={t('Ngôn ngữ giao diện', $locale)}
+              bind:value={config.locale}
+              options={[
+                { value: 'vi', label: 'Tiếng Việt' },
+                { value: 'en', label: 'English' },
+              ]}
+              onchange={changed}
+            /></label
+          ><label
+            >{t('Kích thước mascot', $locale)}<Select
+              label={t('Kích thước mascot', $locale)}
+              value={String(config.scale)}
+              options={[1, 2, 3].map((value) => ({
+                value: String(value),
+                label: `${value}×`,
+              }))}
+              onchange={(value) => {
+                config.scale = Number(value);
+                changed();
+              }}
+            /></label
+          ><label
+            >{t('Vị trí mặc định', $locale)}<Select
+              label={t('Vị trí mặc định', $locale)}
+              bind:value={config.anchor}
+              options={[
+                {
+                  value: 'bottom-right',
+                  label: $locale === 'en' ? 'Bottom right' : 'Dưới phải',
+                },
+                {
+                  value: 'bottom-left',
+                  label: $locale === 'en' ? 'Bottom left' : 'Dưới trái',
+                },
+                {
+                  value: 'top-right',
+                  label: $locale === 'en' ? 'Top right' : 'Trên phải',
+                },
+                {
+                  value: 'top-left',
+                  label: $locale === 'en' ? 'Top left' : 'Trên trái',
+                },
+              ]}
+              onchange={changed}
+            /></label
+          >
+        </div>
+        <label
           >{t('Độ trong suốt', $locale)}<input
             type="range"
             min="0.3"
@@ -198,34 +414,17 @@
             step="0.05"
             bind:value={config.opacity}
           /></label
-        ><button onclick={() => call('reset_position')}
-          >{t('Về vị trí mặc định', $locale)}</button
         >
-        <label
-          >{t('Vị trí mặc định', $locale)}<Select
-            label={t('Vị trí mặc định', $locale)}
-            bind:value={config.anchor}
-            options={[
-              {
-                value: 'bottom-right',
-                label: $locale === 'en' ? 'Bottom right' : 'Dưới phải',
-              },
-              {
-                value: 'bottom-left',
-                label: $locale === 'en' ? 'Bottom left' : 'Dưới trái',
-              },
-              {
-                value: 'top-right',
-                label: $locale === 'en' ? 'Top right' : 'Trên phải',
-              },
-              {
-                value: 'top-left',
-                label: $locale === 'en' ? 'Top left' : 'Trên trái',
-              },
-            ]}
-            onchange={changed}
-          /></label
-        >
+        <div class="actions">
+          <label class="check"
+            ><input type="checkbox" bind:checked={config.autostart} />{t(
+              'Khởi động cùng hệ thống',
+              $locale,
+            )}</label
+          ><button onclick={() => call('reset_position')}
+            >{t('Về vị trí mặc định', $locale)}</button
+          >
+        </div>
       {:else if tab === 'API'}<label class="check"
           ><input type="checkbox" bind:checked={show} />{t(
             'Hiện khóa đang nhập',
@@ -240,14 +439,14 @@
                   : 'LibreTranslate'}
               <small>{stored[name] ? '● Đã có key' : '○ Chưa có key'}</small>
             </h3>
-            <input
-              aria-label={`${name} API key`}
-              type={show ? 'text' : 'password'}
-              bind:value={keys[name]}
-              placeholder={t('Nhập key mới · để trống + Lưu để xóa', $locale)}
-              autocomplete="off"
-            />
-            <div class="actions">
+            <div class="compact-inline-row">
+              <input
+                aria-label={`${name} API key`}
+                type={show ? 'text' : 'password'}
+                bind:value={keys[name]}
+                placeholder={t('Nhập key mới · để trống + Lưu để xóa', $locale)}
+                autocomplete="off"
+              />
               <button onclick={() => saveKey(name)}
                 >{t('Lưu key', $locale)}</button
               ><button
@@ -268,151 +467,374 @@
         <p class="muted">
           {t('Khóa chỉ được lưu trong kho bảo mật của hệ điều hành.', $locale)}
         </p>
-      {:else if tab === 'AI'}<label
-          >Chế độ<Select
-            label="Chế độ"
-            bind:value={config.mode}
-            options={[
-              { value: 'online', label: 'Online' },
-              { value: 'hybrid', label: 'Hybrid (Online, dự phòng cục bộ)' },
-              { value: 'offline', label: 'Offline (chỉ model trên máy)' },
-            ]}
-            onchange={changed}
-          /></label
-        >
-        <p class="muted">
-          Offline không gửi chat hay bản dịch ra ngoài máy; Hybrid dùng model
-          cục bộ khi model chính lỗi.
-        </p>
-        <label
-          >Nguồn model<Select
-            label="Nguồn model"
-            bind:value={config.modelSource}
-            options={[
-              { value: 'external', label: 'Model ngoài' },
-              { value: 'cloudflare', label: 'Model Cloudflare' },
-            ]}
-            onchange={changed}
-          /></label
-        >
-        {#if config.modelSource === 'cloudflare'}
-          <label
-            >Địa chỉ Michiyo Cloud<input
-              aria-label="Địa chỉ Michiyo Cloud"
-              bind:value={config.cloudUrl}
-              placeholder="https://michiyo.example.workers.dev"
-            /></label
-          >
-          <label
-            >Model Cloudflare (để trống = mặc định)<input
-              aria-label="Model Cloudflare"
-              bind:value={config.cloudModel}
-              placeholder="@cf/meta/llama-3.1-8b-instruct"
-            /></label
-          >
-          <div class="key-card">
-            <h3>
-              Ghép nối thiết bị <small
-                >{stored.cloud ? '● Đã ghép nối' : '○ Chưa ghép nối'}</small
-              >
-            </h3>
-            {#if !stored.cloud}
-              <input
-                aria-label="Mã ghép nối"
-                bind:value={keys.cloudCode}
-                placeholder="Mã từ trang quản trị (hiệu lực 10 phút)"
-                autocomplete="off"
-              />
-            {/if}
-            <div class="actions">
-              {#if stored.cloud}<button onclick={unpairCloud}
-                  >Ngắt kết nối</button
-                >{:else}<button
-                  disabled={!keys.cloudCode.trim() || !config.cloudUrl.trim()}
-                  onclick={pairCloud}>Ghép nối</button
-                >{/if}
-            </div>
-          </div>
-        {:else}
-          <label
-            >Nhà cung cấp chat<Select
-              label="Nhà cung cấp chat"
-              bind:value={config.chatProvider}
+      {:else if tab === 'AI'}
+        {#await loadLocalStatus()}{/await}
+        <div class="ai-top-bar">
+          <label class="ai-mode-field"
+            >Chế độ<Select
+              label="Chế độ"
+              bind:value={config.mode}
               options={[
-                { value: 'claude', label: 'Claude (Agent SDK)' },
-                { value: 'openai_compat', label: 'OpenAI-compatible' },
+                { value: 'online', label: 'Online' },
+                { value: 'hybrid', label: 'Hybrid (Dự phòng cục bộ)' },
+                { value: 'offline', label: 'Offline (Chỉ model trên máy)' },
               ]}
-              onchange={changed}
+              onchange={() => {
+                if (config.mode === 'offline') aiTab = 'local';
+                changed();
+              }}
             /></label
           >
-          {#if config.chatProvider === 'openai_compat'}
-            <div class="actions" role="group" aria-label="Preset">
-              {#each presets as [name, url]}<button
-                  onclick={() => {
-                    config.openaiBase = url;
-                    changed();
-                  }}>{name}</button
-                >{/each}
-            </div>
-            <label
-              >Địa chỉ API<input
-                aria-label="Địa chỉ API"
-                bind:value={config.openaiBase}
-              /></label
+          <div class="ai-seg-tabs" role="tablist" aria-label="Loại cài đặt AI">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={aiTab === 'local'}
+              class:active={aiTab === 'local'}
+              onclick={() => selectAiTab('local')}
             >
-            <label
-              >Model<input
-                aria-label="Model ngoài"
-                list="models-external"
-                bind:value={config.openaiModel}
-              /><datalist id="models-external"
-                >{#each models.external as id}<option value={id}
-                  ></option>{/each}</datalist
-              ></label
+              <span class="seg-dot" class:on={localServer?.online}></span>
+              Google Local (Ollama)
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={aiTab === 'external'}
+              class:active={aiTab === 'external'}
+              onclick={() => selectAiTab('external')}
             >
-            <div class="key-card">
+              Model ngoài (Claude · OpenAI)
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={aiTab === 'cloudflare'}
+              class:active={aiTab === 'cloudflare'}
+              onclick={() => selectAiTab('cloudflare')}
+            >
+              Model Cloudflare
+            </button>
+          </div>
+        </div>
+
+        {#if aiTab === 'local'}
+          <div class="key-card ai-pane">
+            <div class="ai-pane-head">
               <h3>
-                API key <small
-                  >{stored.openai ? '● Đã có key' : '○ Chưa có key'}</small
+                Máy chủ Ollama · Google Gemma <small
+                  >{localServer?.online
+                    ? `● Đang chạy${localServer.version ? ` (v${localServer.version})` : ''}`
+                    : localServer
+                      ? '○ Chưa kết nối (chạy ollama serve)'
+                      : '○ Máy chủ cục bộ'}</small
                 >
               </h3>
-              <input
-                aria-label="openai API key"
-                type="password"
-                bind:value={keys.openai}
-                placeholder={t('Nhập key mới · để trống + Lưu để xóa', $locale)}
-                autocomplete="off"
-              />
               <div class="actions">
-                <button onclick={() => saveKey('openai')}
-                  >{t('Lưu key', $locale)}</button
-                ><button onclick={() => loadModels('external')}
-                  >Liệt kê model</button
+                <button
+                  class:primary={config.modelSource === 'external' &&
+                    config.chatProvider === 'local'}
+                  disabled={!config.localModel.trim()}
+                  onclick={() => {
+                    config.modelSource = 'external';
+                    config.chatProvider = 'local';
+                    changed();
+                  }}
+                  >{config.modelSource === 'external' &&
+                  config.chatProvider === 'local'
+                    ? '✓ Đang dùng Local'
+                    : 'Dùng làm AI chính'}</button
+                >
+                <button onclick={() => loadModels('local')}
+                  >Kiểm tra kết nối</button
                 >
               </div>
             </div>
-          {/if}
+            <div class="columns">
+              <label
+                >Địa chỉ cục bộ<input
+                  aria-label="Địa chỉ cục bộ"
+                  bind:value={config.localBase}
+                /></label
+              >
+              <label
+                >Model cục bộ<input
+                  aria-label="Model cục bộ"
+                  list="models-local"
+                  bind:value={config.localModel}
+                  placeholder="Ví dụ: gemma3:4b"
+                /><datalist id="models-local"
+                  >{#each models.local as id}<option value={id}
+                    ></option>{/each}</datalist
+                ></label
+              >
+            </div>
+            {#if pullProgress && pullProgress.status === 'pulling'}
+              <div class="local-pull-box" role="status" aria-live="polite">
+                <div class="local-pull-header">
+                  <strong
+                    >Đang tải {pullProgress.model} ({pullProgress.percent}%)</strong
+                  >
+                  {#if pullProgress.totalBytes > 0}
+                    <small
+                      >{formatBytes(pullProgress.completedBytes)} / {formatBytes(
+                        pullProgress.totalBytes,
+                      )}</small
+                    >
+                  {/if}
+                </div>
+                <progress value={pullProgress.percent} max="100"></progress>
+                <div class="local-pull-footer">
+                  <small>{pullProgress.phase}</small>
+                  <button onclick={cancelLocalPull}>Huỷ tải</button>
+                </div>
+              </div>
+            {/if}
+            <div
+              class="local-model-list"
+              aria-label="Danh sách model Google Gemma"
+            >
+              {#each recommendedList as item}
+                {@const installed =
+                  installedMap.get(item.id) || models.local.includes(item.id)}
+                <div class="local-model-row">
+                  <div class="local-model-meta">
+                    <strong>
+                      {item.label}
+                      <code>{item.id}</code>
+                      {#if item.recommended}<span class="local-badge"
+                          >Khuyên dùng</span
+                        >{/if}
+                      <span class="local-spec"
+                        >{installed && installedMap.get(item.id)?.sizeBytes
+                          ? formatBytes(installedMap.get(item.id)!.sizeBytes)
+                          : item.sizeHint} · {item.ramHint}</span
+                      >
+                    </strong>
+                    <small>{item.description}</small>
+                  </div>
+                  <div class="actions">
+                    {#if installed}
+                      <button
+                        disabled={config.localModel === item.id}
+                        onclick={() => {
+                          config.localModel = item.id;
+                          changed();
+                        }}
+                        >{config.localModel === item.id
+                          ? 'Đang chọn'
+                          : 'Chọn dùng'}</button
+                      >
+                      <button onclick={() => deleteLocalModel(item.id)}
+                        >Xoá</button
+                      >
+                    {:else}
+                      <button
+                        disabled={pullProgress?.status === 'pulling'}
+                        onclick={() => pullLocalModel(item.id)}>Tải về</button
+                      >
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+              {#each extraInstalledModels as ext}
+                <div class="local-model-row">
+                  <div class="local-model-meta">
+                    <strong>
+                      <code>{ext.name}</code>
+                      <span class="local-badge">Đã cài</span>
+                      <span class="local-spec"
+                        >{ext.sizeBytes
+                          ? formatBytes(ext.sizeBytes)
+                          : 'Local'}{ext.parameterSize
+                          ? ` · ${ext.parameterSize}`
+                          : ''}</span
+                      >
+                    </strong>
+                  </div>
+                  <div class="actions">
+                    <button
+                      disabled={config.localModel === ext.name}
+                      onclick={() => {
+                        config.localModel = ext.name;
+                        changed();
+                      }}
+                      >{config.localModel === ext.name
+                        ? 'Đang chọn'
+                        : 'Chọn dùng'}</button
+                    >
+                    <button onclick={() => deleteLocalModel(ext.name)}
+                      >Xoá</button
+                    >
+                  </div>
+                </div>
+              {/each}
+            </div>
+            <div class="local-custom-pull">
+              <input
+                aria-label="Tên model Ollama cần tải"
+                bind:value={customPullModel}
+                placeholder="Tải model khác từ Ollama (vd: gemma3:27b, qwen2.5:7b)"
+              />
+              <button
+                disabled={!customPullModel.trim() ||
+                  pullProgress?.status === 'pulling'}
+                onclick={() => pullLocalModel(customPullModel)}
+                >Tải theo tên</button
+              >
+            </div>
+          </div>
+        {:else if aiTab === 'external'}
+          <div class="key-card ai-pane">
+            <div class="ai-pane-head">
+              <h3>Cài đặt Model ngoài (Claude · OpenAI)</h3>
+              <div
+                class="ai-sub-pills"
+                role="group"
+                aria-label="Nhà cung cấp chat"
+              >
+                <button
+                  type="button"
+                  class:active={config.chatProvider !== 'openai_compat'}
+                  onclick={() => {
+                    config.modelSource = 'external';
+                    config.chatProvider = 'claude';
+                    changed();
+                  }}>Claude (Agent SDK)</button
+                >
+                <button
+                  type="button"
+                  class:active={config.chatProvider === 'openai_compat'}
+                  onclick={() => {
+                    config.modelSource = 'external';
+                    config.chatProvider = 'openai_compat';
+                    changed();
+                  }}>OpenAI-compatible</button
+                >
+              </div>
+            </div>
+            {#if config.chatProvider === 'openai_compat'}
+              <div class="actions preset-row" role="group" aria-label="Preset">
+                {#each presets as [name, url]}<button
+                    onclick={() => {
+                      config.openaiBase = url;
+                      changed();
+                    }}>{name}</button
+                  >{/each}
+              </div>
+              <div class="columns">
+                <label
+                  >Địa chỉ API<input
+                    aria-label="Địa chỉ API"
+                    bind:value={config.openaiBase}
+                  /></label
+                >
+                <label
+                  >Model<input
+                    aria-label="Model ngoài"
+                    list="models-external"
+                    bind:value={config.openaiModel}
+                  /><datalist id="models-external"
+                    >{#each models.external as id}<option value={id}
+                      ></option>{/each}</datalist
+                  ></label
+                >
+              </div>
+              <label
+                >API key ({stored.openai ? '● Đã có key' : '○ Chưa có key'})
+                <div class="compact-inline-row">
+                  <input
+                    aria-label="openai API key"
+                    type="password"
+                    bind:value={keys.openai}
+                    placeholder={t(
+                      'Nhập key mới · để trống + Lưu để xóa',
+                      $locale,
+                    )}
+                    autocomplete="off"
+                  />
+                  <button onclick={() => saveKey('openai')}
+                    >{t('Lưu key', $locale)}</button
+                  ><button onclick={() => loadModels('external')}
+                    >Liệt kê model</button
+                  >
+                </div>
+              </label>
+            {:else}
+              <div class="columns">
+                <label
+                  >Model Claude<Select
+                    label="Model Claude"
+                    bind:value={config.model}
+                    options={choices(['claude-haiku-5-5', 'claude-sonnet-5-5'])}
+                    onchange={changed}
+                  /></label
+                >
+                <label
+                  >Khóa Claude ({stored.claude
+                    ? '● Đã có key'
+                    : '○ Chưa có key'})
+                  <div class="compact-inline-row">
+                    <input
+                      aria-label="claude API key"
+                      type="password"
+                      bind:value={keys.claude}
+                      placeholder="Nhập key Claude mới"
+                      autocomplete="off"
+                    />
+                    <button onclick={() => saveKey('claude')}
+                      >{t('Lưu key', $locale)}</button
+                    >
+                  </div>
+                </label>
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <div class="key-card ai-pane">
+            <div class="ai-pane-head">
+              <h3>
+                Michiyo Cloud (Cloudflare Workers AI) <small
+                  >{stored.cloud ? '● Đã ghép nối' : '○ Chưa ghép nối'}</small
+                >
+              </h3>
+            </div>
+            <div class="columns">
+              <label
+                >Địa chỉ Michiyo Cloud<input
+                  aria-label="Địa chỉ Michiyo Cloud"
+                  bind:value={config.cloudUrl}
+                  placeholder="https://michiyo.example.workers.dev"
+                /></label
+              >
+              <label
+                >Model Cloudflare<input
+                  aria-label="Model Cloudflare"
+                  bind:value={config.cloudModel}
+                  placeholder="@cf/meta/llama-3.1-8b-instruct"
+                /></label
+              >
+            </div>
+            <label
+              >Ghép nối thiết bị
+              <div class="compact-inline-row">
+                {#if !stored.cloud}
+                  <input
+                    aria-label="Mã ghép nối"
+                    bind:value={keys.cloudCode}
+                    placeholder="Mã từ trang quản trị (hiệu lực 10 phút)"
+                    autocomplete="off"
+                  />
+                  <button
+                    disabled={!keys.cloudCode.trim() || !config.cloudUrl.trim()}
+                    onclick={pairCloud}>Ghép nối</button
+                  >
+                {:else}
+                  <button onclick={unpairCloud}>Ngắt kết nối thiết bị</button>
+                {/if}
+              </div>
+            </label>
+          </div>
         {/if}
-        <h3>Model cục bộ</h3>
-        <label
-          >Địa chỉ cục bộ<input
-            aria-label="Địa chỉ cục bộ"
-            bind:value={config.localBase}
-          /></label
-        >
-        <label
-          >Model cục bộ<input
-            aria-label="Model cục bộ"
-            list="models-local"
-            bind:value={config.localModel}
-          /><datalist id="models-local"
-            >{#each models.local as id}<option value={id}
-              ></option>{/each}</datalist
-          ></label
-        >
-        <div class="actions">
-          <button onclick={() => loadModels('local')}>Kiểm tra kết nối</button>
-        </div>
       {:else if tab === 'Đồng bộ'}
         {#await loadSync()}{/await}
         <p class="muted">
@@ -662,3 +1084,204 @@
     >
   </footer>
 </div>
+
+<style>
+  .ai-top-bar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .ai-mode-field {
+    flex: 0 1 220px;
+    margin: 0 !important;
+  }
+  .ai-seg-tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    background: #e7ece5;
+    border: 1px solid #d5ded2;
+    flex: 1 1 auto;
+    justify-content: stretch;
+  }
+  .ai-seg-tabs button {
+    flex: 1 1 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 5px 10px;
+    min-height: 28px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: #4b5c50;
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .ai-seg-tabs button:hover {
+    background: rgba(255, 255, 255, 0.55);
+  }
+  .ai-seg-tabs button.active {
+    background: #ffffff;
+    color: #1f472f;
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(24, 45, 31, 0.1);
+  }
+  .seg-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #9aa79c;
+    flex-shrink: 0;
+  }
+  .seg-dot.on {
+    background: #2f9e53;
+  }
+  .ai-pane {
+    padding: 10px 12px !important;
+    margin: 0 !important;
+  }
+  .ai-pane-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .ai-pane-head h3 {
+    margin: 0 !important;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ai-pane-head h3 small {
+    float: none !important;
+  }
+  .ai-sub-pills {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 7px;
+    background: #eef2ec;
+    border: 1px solid #d9e1d6;
+  }
+  .ai-sub-pills button {
+    border: 0;
+    background: transparent;
+    padding: 4px 9px;
+    font-size: 11.5px;
+    border-radius: 5px;
+  }
+  .ai-sub-pills button.active {
+    background: #385e4b;
+    color: #ffffff;
+    font-weight: 600;
+  }
+  .preset-row {
+    margin-bottom: 8px;
+  }
+  .compact-inline-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .compact-inline-row input {
+    flex: 1 1 auto;
+    margin-bottom: 0 !important;
+  }
+  .local-pull-box {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    background: #eef4ef;
+    border: 1px solid #cfe0d2;
+    margin: 4px 0 6px;
+  }
+  .local-pull-header,
+  .local-pull-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .local-pull-box progress {
+    width: 100%;
+    height: 8px;
+    accent-color: #345c43;
+  }
+  .local-model-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 4px;
+  }
+  .local-model-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #f8faf7;
+    border: 1px solid #e1e8e0;
+    flex-wrap: wrap;
+  }
+  .local-model-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1 1 220px;
+  }
+  .local-model-meta strong {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    font-size: 12px;
+  }
+  .local-model-meta code {
+    font-size: 11px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: #e6eee7;
+    color: #264833;
+  }
+  .local-spec {
+    font-size: 11px;
+    font-weight: 400;
+    color: #6b7a6e;
+  }
+  .local-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: #345c43;
+    color: #ffffff;
+  }
+  .local-custom-pull {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+  .local-custom-pull input {
+    flex: 1 1 180px;
+    min-width: 0;
+    margin-bottom: 0 !important;
+  }
+</style>

@@ -309,3 +309,14 @@ Ngày: 2026-10-28 · Prompt thực thi: `docs/PLATFORM_PROMPT.md`
   - Hỗ trợ cấu hình động Telegram Bot từ Web Admin (bật/tắt, danh sách `allowed_chat_ids`, `model`, `system_prompt`, `hourly_limit`, `allow_workspace_queries`) với fallback về biến môi trường.
   - Hỗ trợ các lệnh truy vấn/ghi dữ liệu trực tiếp với Data Server trên Telegram: `/today`, `/habits`, `/notes [từ khóa]`, `/note <nội dung>` (lưu vào `sync_records` và tự động đồng bộ về Windows/Mobile).
 - **Kiểm tra:** `npm run build`, `npm test` (71/71 test đạt), `npm run typecheck --workspace @michiyo/cloud`, `npm run check --workspace @michiyo/admin`, `npm run build --workspace @michiyo/admin`, `cargo fmt --check` và `cargo test --manifest-path src-tauri/Cargo.toml --locked` (50/50 test Rust đạt).
+
+### Bổ sung hỗ trợ Model Local (Google Gemma · Ollama) trên App Windows — 2026-10-30
+
+- **Backend Rust (`src-tauri/src/ai/ollama.rs`, `src-tauri/src/ai/mod.rs`, `src-tauri/src/commands/ai.rs`, `src-tauri/src/providers/mod.rs`):**
+  - Thêm module `ai::ollama` quản lý kết nối máy chủ Ollama cục bộ (`/api/version`, `/api/tags`, `/api/pull`, `/api/delete`), chuẩn hoá linh hoạt cả URL gốc (`http://127.0.0.1:11434`) và URL OpenAI-compatible (`http://127.0.0.1:11434/v1`).
+  - Hỗ trợ tải model trực tiếp từ giao diện với luồng NDJSON, quy đổi pha tiếng Việt, tính phần trăm (`%`), phát sự kiện `local-pull-progress` và cho phép huỷ tải (`local_cancel_pull`).
+  - Bổ sung danh sách model Google Gemma gợi ý (`gemma3:4b`, `gemma3:1b`, `gemma3:12b`, `gemma2:9b`).
+  - Mở rộng `chatProvider: "local"` trong router AI và engine dịch `"local"` cho phép cả Chat, Tóm tắt, Gợi ý hành động và Dịch văn bản chạy hoàn toàn cục bộ trên máy ở cả chế độ Online, Hybrid và Offline.
+- **Giao diện App Windows (`src/settings/Settings.svelte`, `src/shell/Shell.svelte`, `src/lib/api.ts`):**
+  - Thêm lựa chọn `Google Local (Gemma · Ollama)` trong **Nhà cung cấp chat**.
+  - Nâng cấp thẻ **Model cục bộ (Google Gemma · Ollama)** trong Cài đặt → AI: hiển thị trạng thái máy chủ Ollama, thanh tiến trình tải model (`%` + dung lượng), danh sách cài nhanh Google Gemma (`Tải về` / `Chọn dùng` / `Xoá`) và ô tải model bất kỳ theo tên.

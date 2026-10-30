@@ -1,7 +1,9 @@
 import type { Config } from './api';
 const isLocal = (value: string) => {
   try {
-    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(value).hostname);
+    return ['localhost', '127.0.0.1', '[::1]'].includes(
+      new URL(value).hostname,
+    );
   } catch {
     return false;
   }
@@ -36,7 +38,7 @@ export function validateConfig(c: Config) {
   if (
     !c.providers.length ||
     c.providers.some(
-      (p) => !['claude', 'google', 'libre', 'mymemory'].includes(p),
+      (p) => !['claude', 'google', 'libre', 'mymemory', 'local'].includes(p),
     )
   )
     throw new Error('Danh sách engine không hợp lệ');

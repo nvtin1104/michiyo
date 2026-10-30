@@ -409,7 +409,11 @@ pub async fn ai_models(
     let c = config::read(&app)?;
     let (base, key) = match target.as_str() {
         "local" => (
-            config::string(&c, "localBase", "http://127.0.0.1:11434/v1"),
+            crate::ai::ollama::normalize_local_base(&config::string(
+                &c,
+                "localBase",
+                crate::ai::DEFAULT_LOCAL_BASE,
+            )),
             None,
         ),
         "external" => (
@@ -419,6 +423,59 @@ pub async fn ai_models(
         _ => return Err("Nguồn model không hợp lệ".into()),
     };
     crate::ai::list_models(&state.client, &base, key.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn local_status(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+) -> Result<crate::ai::ollama::LocalServerStatus, String> {
+    let c = config::read(&app)?;
+    let base = config::string(&c, "localBase", crate::ai::DEFAULT_LOCAL_BASE);
+    crate::ai::ollama::status(&state.client, &base, &state.local_pull).await
+}
+
+#[tauri::command]
+pub async fn local_pull_model(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    model: String,
+) -> Result<crate::ai::ollama::LocalPullProgress, String> {
+    let c = config::read(&app)?;
+    let base = config::string(&c, "localBase", crate::ai::DEFAULT_LOCAL_BASE);
+    crate::ai::ollama::pull_model(
+        &state.client,
+        &base,
+        &model,
+        state.local_pull.clone(),
+        |progress| {
+            let _ = app.emit("local-pull-progress", progress);
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub fn local_cancel_pull(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+) -> Option<crate::ai::ollama::LocalPullProgress> {
+    let cancelled = state.local_pull.cancel();
+    if let Some(ref p) = cancelled {
+        let _ = app.emit("local-pull-progress", p);
+    }
+    cancelled
+}
+
+#[tauri::command]
+pub async fn local_delete_model(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    model: String,
+) -> Result<(), String> {
+    let c = config::read(&app)?;
+    let base = config::string(&c, "localBase", crate::ai::DEFAULT_LOCAL_BASE);
+    crate::ai::ollama::delete_model(&state.client, &base, &model).await
 }
 
 #[tauri::command]

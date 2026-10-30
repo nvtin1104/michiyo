@@ -1,10 +1,11 @@
 //! Chooses which model answers a chat and enforces the Offline/Online/Hybrid mode.
 pub mod actions;
+pub mod ollama;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::Notify;
 
-const DEFAULT_LOCAL_BASE: &str = "http://127.0.0.1:11434/v1";
+pub const DEFAULT_LOCAL_BASE: &str = "http://127.0.0.1:11434/v1";
 const NOT_CONNECTED: &str = "Chưa kết nối cloud. Model Cloudflare cần backend Michiyo Cloud.";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,11 +67,11 @@ pub fn validate_base(url: &str) -> Result<(), String> {
 
 /// Backends to try in order. Offline never leaves the machine; Hybrid falls back to the local model.
 pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
-    let local = (!text(config, "localModel", "").is_empty()).then(|| Backend::OpenAi {
-        base: text(config, "localBase", DEFAULT_LOCAL_BASE)
-            .trim_end_matches('/')
-            .into(),
-        model: text(config, "localModel", "").into(),
+    let local_base = ollama::normalize_local_base(text(config, "localBase", DEFAULT_LOCAL_BASE));
+    let local_model = text(config, "localModel", "");
+    let local = (!local_model.is_empty()).then(|| Backend::OpenAi {
+        base: local_base.clone(),
+        model: local_model.into(),
         use_key: false,
     });
     let primary = if config["modelSource"].as_str() == Some("cloudflare") {
@@ -81,6 +82,17 @@ pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
         Backend::Cloudflare {
             base: format!("{url}/v1/ai"),
             model: text(config, "cloudModel", "").into(),
+        }
+    } else if config["chatProvider"].as_str() == Some("local") {
+        if local_model.is_empty() {
+            return Err(
+                "Chưa chọn model cục bộ. Hãy tải hoặc chọn model trong Cài đặt → AI.".into(),
+            );
+        }
+        Backend::OpenAi {
+            base: local_base,
+            model: local_model.into(),
+            use_key: false,
         }
     } else if config["chatProvider"].as_str() == Some("openai_compat") {
         Backend::OpenAi {
@@ -101,7 +113,15 @@ pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
         } else {
             local.ok_or("Chế độ Offline cần model chạy trên máy này (ví dụ Ollama). Hãy cấu hình trong Cài đặt → AI.")?
         }],
-        "hybrid" => std::iter::once(primary).chain(local).collect(),
+        "hybrid" => {
+            let mut list = vec![primary];
+            if let Some(local_backend) = local {
+                if list[0] != local_backend {
+                    list.push(local_backend);
+                }
+            }
+            list
+        }
         _ => vec![primary],
     };
     for backend in &backends {
@@ -119,11 +139,14 @@ pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
     Ok(backends)
 }
 
-/// Offline keeps translation on this machine: only a LibreTranslate server on localhost qualifies.
+/// Offline keeps translation on this machine: a LibreTranslate server or local AI model on localhost qualifies.
 pub fn translator_allowed(config: &Value, engine: &str) -> bool {
     mode(config) != "offline"
         || (engine == "libre"
             && is_local_url(text(config, "libreUrl", "https://libretranslate.com")))
+        || (engine == "local"
+            && is_local_url(text(config, "localBase", DEFAULT_LOCAL_BASE))
+            && !text(config, "localModel", "").is_empty())
 }
 
 #[derive(Debug, PartialEq)]
@@ -303,6 +326,17 @@ mod tests {
         assert_eq!(plan.len(), 2);
         assert!(matches!(plan[0], Backend::Claude { .. }) && plan[1].is_local());
         assert_eq!(super::plan(&json!({"mode": "hybrid"})).unwrap().len(), 1);
+        let local_provider = json!({"chatProvider": "local", "localBase": "http://127.0.0.1:11434", "localModel": "gemma3:4b"});
+        assert_eq!(
+            super::plan(&local_provider).unwrap(),
+            vec![Backend::OpenAi {
+                base: "http://127.0.0.1:11434/v1".into(),
+                model: "gemma3:4b".into(),
+                use_key: false
+            }]
+        );
+        assert!(super::plan(&json!({"chatProvider": "local", "localModel": ""})).is_err());
+
         assert!(super::plan(&json!({"modelSource": "cloudflare"}))
             .unwrap_err()
             .contains("cloud"));
@@ -350,10 +384,13 @@ mod tests {
         assert!(translator_allowed(&online, "google"));
         let offline = json!({"mode": "offline", "libreUrl": "http://127.0.0.1:5000"});
         assert!(translator_allowed(&offline, "libre"));
+        let offline_local = json!({"mode": "offline", "localBase": "http://127.0.0.1:11434/v1", "localModel": "gemma3:4b"});
+        assert!(translator_allowed(&offline_local, "local"));
         for engine in ["claude", "google", "mymemory"] {
             assert!(!translator_allowed(&offline, engine));
         }
         assert!(!translator_allowed(&json!({"mode": "offline"}), "libre"));
+        assert!(!translator_allowed(&json!({"mode": "offline"}), "local"));
     }
 
     #[test]

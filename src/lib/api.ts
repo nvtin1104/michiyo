@@ -46,7 +46,7 @@ export const defaults = {
   live2d: false,
   mode: 'online' as 'offline' | 'online' | 'hybrid',
   modelSource: 'external' as 'external' | 'cloudflare',
-  chatProvider: 'claude' as 'claude' | 'openai_compat',
+  chatProvider: 'claude' as 'claude' | 'openai_compat' | 'local',
   openaiBase: 'https://api.openai.com/v1',
   openaiModel: '',
   localBase: 'http://127.0.0.1:11434/v1',
@@ -56,3 +56,41 @@ export const defaults = {
   syncScopes: { notes: true, habits: true, calendar: true, activity: true },
 };
 export type Config = typeof defaults;
+
+export type LocalInstalledModel = {
+  name: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  family: string | null;
+  parameterSize: string | null;
+  quantization: string | null;
+};
+
+export type LocalRecommendedModel = {
+  id: string;
+  label: string;
+  sizeHint: string;
+  ramHint: string;
+  description: string;
+  recommended: boolean;
+};
+
+export type LocalPullProgress = {
+  model: string;
+  status: 'pulling' | 'completed' | 'failed' | 'cancelled';
+  phase: string;
+  completedBytes: number;
+  totalBytes: number;
+  percent: number;
+  error: string | null;
+};
+
+export type LocalServerStatus = {
+  online: boolean;
+  baseUrl: string;
+  version: string | null;
+  message: string | null;
+  installedModels: LocalInstalledModel[];
+  activePull: LocalPullProgress | null;
+  recommendedModels: LocalRecommendedModel[];
+};

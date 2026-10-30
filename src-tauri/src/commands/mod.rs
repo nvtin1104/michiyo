@@ -38,6 +38,7 @@ pub struct Runtime {
     pub move_generation: std::sync::atomic::AtomicU64,
     pub move_save_active: std::sync::atomic::AtomicBool,
     pub surface_scan_active: std::sync::atomic::AtomicBool,
+    pub local_pull: Arc<crate::ai::ollama::PullTracker>,
 }
 
 impl Default for Runtime {
@@ -68,6 +69,7 @@ impl Default for Runtime {
             move_generation: std::sync::atomic::AtomicU64::new(0),
             move_save_active: std::sync::atomic::AtomicBool::new(false),
             surface_scan_active: std::sync::atomic::AtomicBool::new(false),
+            local_pull: Arc::new(crate::ai::ollama::PullTracker::default()),
         }
     }
 }
