@@ -2,13 +2,22 @@
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import { locale, t } from '../lib/i18n';
-  import { call, desktop, type Config } from '../lib/api';
+  import { desktop, type Config } from '../lib/api';
+  import {
+    workspace,
+    type DueReminder,
+    type SyncStatusInfo,
+    type TodayAgendaItem,
+    type TodayHabitItem,
+  } from '../lib/workspace-api';
   import Chat from '../chat/Chat.svelte';
   import Settings from '../settings/Settings.svelte';
   import Notes from '../notes/Notes.svelte';
   import Activity from '../activity/Activity.svelte';
   import Habits from '../habits/Habits.svelte';
   import Calendar from '../calendar/Calendar.svelte';
+  import Home from './Home.svelte';
+  import ReminderBar from './ReminderBar.svelte';
   import type { Note } from '@michiyo/shared';
 
   export let config: Config;
@@ -20,7 +29,6 @@
     ['habits', 'Thói quen'],
     ['calendar', 'Lịch'],
     ['history', 'Lịch sử'],
-    ['bot', 'Bot'],
   ];
 
   const routes = [
@@ -36,7 +44,6 @@
     habits: 'M12 3a9 9 0 1 0 9 9M8 12l3 3 9-10',
     calendar: 'M4 6h16v14H4V6Zm4-3v6M16 3v6M4 10h16',
     history: 'M4 5v5h5M4.5 10A8 8 0 1 1 4 14M12 7v5l3 2',
-    bot: 'M5 8h14v11H5V8Zm7-5v5M8 12h.01M16 12h.01M9 16h6',
     settings:
       'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2',
   };
@@ -54,45 +61,25 @@
   let calendarVisited = false;
   let pinnedNotes: Note[] = [];
 
-  type Due = {
-    reminder_id: string;
-    title: string;
-    kind: string;
-    occurrence_start: number;
-  };
-  type Today = {
-    id: string;
-    title: string;
-    kind: string;
-    done: boolean;
-    occurrence_start: number;
-  };
-  type TodayHabit = {
-    id: string;
-    title: string;
-    streak: number;
-    done_today: boolean;
-  };
-
-  let agenda: Today[] = [];
-  let habitsToDo: TodayHabit[] = [];
+  let agenda: TodayAgendaItem[] = [];
+  let habitsToDo: TodayHabitItem[] = [];
   let homeError = '';
   const pad = (n: number) => String(n).padStart(2, '0');
   const dayKey = (d: Date) =>
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
   async function loadToday() {
-    if (!desktop) return;
+    if (!workspace().isAvailable()) return;
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     try {
       const [events, habits] = await Promise.all([
-        call<Today[]>('events_range', {
-          from: start.getTime(),
-          until: start.getTime() + 864e5,
-          tzOffset: -now.getTimezoneOffset(),
-        }),
-        call<TodayHabit[]>('habits_list', { today: dayKey(now) }),
+        workspace().eventsRange(
+          start.getTime(),
+          start.getTime() + 864e5,
+          -now.getTimezoneOffset(),
+        ),
+        workspace().habitsList(dayKey(now)),
       ]);
       agenda = events ?? [];
       habitsToDo = (habits ?? []).filter((h) => !h.done_today);
@@ -102,30 +89,20 @@
     }
   }
 
-  async function checkIn(habit: TodayHabit) {
+  async function checkIn(habit: TodayHabitItem) {
     try {
-      await call('habits_check_in', {
-        id: habit.id,
-        date: dayKey(new Date()),
-        done: true,
-      });
+      await workspace().habitCheckIn(habit.id, dayKey(new Date()), true);
     } catch (e) {
       homeError = String(e);
     }
     await loadToday();
   }
 
-  type SyncInfo = {
-    enabled: boolean;
-    pending: number;
-    last_error: string | null;
-    syncing: boolean;
-  };
-  let syncInfo: SyncInfo | null = null;
+  let syncInfo: SyncStatusInfo | null = null;
   async function loadSync() {
-    if (!desktop) return;
+    if (!workspace().isAvailable()) return;
     try {
-      syncInfo = await call<SyncInfo>('sync_status');
+      syncInfo = await workspace().syncStatus();
     } catch {
       syncInfo = null;
     }
@@ -140,23 +117,22 @@
           ? `${syncInfo.pending} thay đổi chờ gửi`
           : 'đã đồng bộ';
 
-  let due: Due[] = [];
+  let due: DueReminder[] = [];
   let reminderError = '';
   async function loadDue() {
-    if (!desktop) return;
+    if (!workspace().isAvailable()) return;
     try {
-      due = (await call<Due[]>('reminders_pending')) ?? [];
+      due = (await workspace().remindersPending()) ?? [];
     } catch {
       due = [];
     }
   }
 
-  async function answer(item: Due, minutes?: number) {
+  async function answer(item: DueReminder, minutes?: number) {
     reminderError = '';
     try {
-      if (minutes)
-        await call('reminders_snooze', { id: item.reminder_id, minutes });
-      else await call('reminders_dismiss', { id: item.reminder_id });
+      if (minutes) await workspace().reminderSnooze(item.reminder_id, minutes);
+      else await workspace().reminderDismiss(item.reminder_id);
     } catch (e) {
       reminderError = String(e);
     }
@@ -164,9 +140,9 @@
   }
 
   async function loadPinned() {
-    if (!desktop) return;
+    if (!workspace().isAvailable()) return;
     try {
-      pinnedNotes = (await call<Note[]>('notes_list', { query: '' }))
+      pinnedNotes = (await workspace().notesList(''))
         .filter((note) => note.pinned)
         .slice(0, 5);
     } catch {
@@ -207,9 +183,9 @@
         );
     loadDue();
     if (desktop) {
-      call('set_timezone', {
-        offset: -new Date().getTimezoneOffset(),
-      }).catch(() => {});
+      workspace()
+        .setTimezone(-new Date().getTimezoneOffset())
+        .catch(() => {});
       listen('reminders-changed', loadDue).then((f) =>
         disposed ? f() : (offReminders = f),
       );
@@ -343,7 +319,6 @@
 
       <div class="topbar-spacer"></div>
 
-      <!-- 2 primary navigation buttons as requested: floating icon buttons -->
       <nav class="topbar-nav" aria-label="Điều hướng thanh trên">
         {#if !isChat}
           <button
@@ -381,28 +356,14 @@
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
             <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
           <span class="sr-only">{t('Cài đặt', $locale)}</span>
         </button>
       </nav>
     </header>
 
-    {#if due.length}
-      <div class="reminders" role="region" aria-label="Nhắc nhở">
-        {#each due as item (item.reminder_id)}
-          <div class="reminder">
-            <span>
-              ⏰ <strong>{item.title}</strong>
-              <small>{new Date(item.occurrence_start).toLocaleTimeString()}</small>
-            </span>
-            <button onclick={() => answer(item, 10)}>Hoãn 10 phút</button>
-            <button onclick={() => answer(item)}>Đã rõ</button>
-          </div>
-        {/each}
-        {#if reminderError}<p class="error" role="alert">{reminderError}</p>{/if}
-      </div>
-    {/if}
+    <ReminderBar {due} error={reminderError} onAnswer={answer} />
 
     <!-- Primary Chat Route -->
     {#if chatVisited}
@@ -413,66 +374,14 @@
 
     <!-- Workspace Routes -->
     {#if route === 'home'}
-      <section class="shell-page">
-        <header>
-          <div>
-            <small>CHÀO MỪNG TRỞ LẠI</small>
-            <h1>Một ngày cùng Michiyo</h1>
-          </div>
-        </header>
-        <p>Quản lý ghi chú, lịch trình, thói quen và hoạt động cùng trợ lý của bạn.</p>
-        <div class="cards">
-          <button onclick={() => navigate('chat')}>✦ Bắt đầu trò chuyện</button>
-          <button onclick={() => navigate('notes')}>📝 Mở ghi chú</button>
-        </div>
-        {#if homeError}<p class="error" role="alert">{homeError}</p>{/if}
-        <div class="home-grid">
-          <section aria-label="Hôm nay">
-            <h2>Hôm nay</h2>
-            {#each agenda as item}
-              <p class:done={item.done}>
-                {new Date(item.occurrence_start).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-                {item.kind === 'todo' ? '☐' : '•'}
-                {item.title}
-              </p>
-            {:else}
-              <p class="muted">Không có lịch hôm nay.</p>
-            {/each}
-            <button onclick={() => navigate('calendar')}>Mở lịch</button>
-          </section>
-          <section aria-label="Thói quen chưa check-in">
-            <h2>Thói quen hôm nay</h2>
-            {#each habitsToDo as habit}
-              <p class="habit-row">
-                <span>{habit.title} <small>🔥 {habit.streak}</small></span>
-                <button
-                  aria-label={`Check-in ${habit.title}`}
-                  onclick={() => checkIn(habit)}>✓</button>
-              </p>
-            {:else}
-              <p class="muted">Đã hoàn thành hết hoặc chưa có thói quen.</p>
-            {/each}
-            <button onclick={() => navigate('habits')}>Mở thói quen</button>
-          </section>
-          <section aria-label="Ghi chú ghim">
-            <h2>Ghi chú ghim</h2>
-            {#each pinnedNotes as note}
-              <p>📌 {note.title}</p>
-            {:else}
-              <p class="muted">Chưa có ghi chú ghim.</p>
-            {/each}
-            <button onclick={() => navigate('notes')}>Mở ghi chú</button>
-          </section>
-        </div>
-      </section>
-    {:else if isWorkspace && !['home', 'notes', 'habits', 'calendar', 'history'].includes(route)}
-      <section class="shell-page">
-        <header><h1>{routes.find(([id]) => id === route)?.[1]}</h1></header>
-        <p>Tính năng này đang được phát triển.</p>
-      </section>
+      <Home
+        {agenda}
+        {habitsToDo}
+        {pinnedNotes}
+        {homeError}
+        onNavigate={navigate}
+        onCheckIn={checkIn}
+      />
     {/if}
 
     {#if route === 'history'}
@@ -812,30 +721,6 @@
   }
   .chat-layout .shell-chat-container { padding-top: 68px; }
 
-  /* Reminders */
-  .reminders {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px 24px;
-    background: #fdf6e7;
-    border-bottom: 1px solid #f3e3be;
-  }
-  .reminder {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-  }
-  .reminder button {
-    padding: 3px 8px;
-    font-size: 11px;
-    border-radius: 5px;
-    border: 1px solid #d7c598;
-    background: #fff;
-    cursor: pointer;
-  }
-
   /* Workspace Pages */
   .shell-page {
     flex: 1;
@@ -857,69 +742,6 @@
   .shell-page[hidden],
   .shell-settings[hidden] {
     display: none;
-  }
-
-  .home-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 16px;
-    margin-top: 24px;
-  }
-  .home-grid section {
-    padding: 16px;
-    background: #fff;
-    border: 1px solid #e1e7e0;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
-  }
-  .home-grid h2 {
-    margin: 0 0 10px;
-    font-size: 15px;
-    color: #24382c;
-  }
-  .home-grid p {
-    font-size: 13.5px;
-    margin: 6px 0;
-    color: #3f5446;
-  }
-  .home-grid p.done {
-    text-decoration: line-through;
-    opacity: 0.55;
-  }
-  .home-grid button {
-    margin-top: 10px;
-    padding: 5px 12px;
-    border-radius: 6px;
-    border: 1px solid #d4dfd4;
-    background: #f5f8f5;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .habit-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .cards {
-    display: flex;
-    gap: 12px;
-    margin: 16px 0;
-  }
-  .cards button {
-    padding: 14px 20px;
-    background: #fff;
-    border: 1px solid #d7e0d7;
-    border-radius: 10px;
-    font-size: 13.5px;
-    font-weight: 600;
-    color: #284b35;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
-    transition: all 0.15s ease;
-  }
-  .cards button:hover {
-    background: #f2f7f2;
-    transform: translateY(-1px);
   }
 
   @media (max-width: 760px) {
@@ -944,6 +766,5 @@
     .topbar-nav { gap: 4px; }
     .floating-icon-btn { width: 34px; height: 34px; }
     .topbar-crumb strong { display: none; }
-    .cards { flex-wrap: wrap; }
   }
 </style>

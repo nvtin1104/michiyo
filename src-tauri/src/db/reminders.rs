@@ -112,7 +112,8 @@ pub fn set_for_event(
             });
             r.rev += 1;
             r.minutes_before = minutes;
-            (r.fired_for, r.pending_start, r.snooze_until, r.snooze_start) = (None, None, None, None);
+            (r.fired_for, r.pending_start, r.snooze_until, r.snooze_start) =
+                (None, None, None, None);
             write(tx, &r, false, device, at)?;
         }
     }
@@ -133,7 +134,11 @@ pub fn minutes_by_event(db: &Connection) -> DbResult<HashMap<String, i64>> {
 fn live(db: &Connection) -> DbResult<Vec<Reminder>> {
     let mut stmt = db.prepare(&format!("{SELECT} WHERE deleted_at IS NULL"))?;
     let rows = stmt.query_map([], parse)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().map(|(r, _)| r).collect())
+    Ok(rows
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|(r, _)| r)
+        .collect())
 }
 
 fn live_event(db: &Connection, id: &str) -> DbResult<Option<Event>> {
@@ -158,7 +163,9 @@ pub fn fire_due(db: &mut Connection, at: i64, tz_offset: i64) -> DbResult<Vec<Pe
     let tx = db.transaction()?;
     let device = device_id(&tx)?;
     for mut r in candidates {
-        let Some(event) = live_event(&tx, &r.event_id)? else { continue };
+        let Some(event) = live_event(&tx, &r.event_id)? else {
+            continue;
+        };
         if event.done {
             continue;
         }
@@ -193,7 +200,9 @@ pub fn fire_due(db: &mut Connection, at: i64, tz_offset: i64) -> DbResult<Vec<Pe
 pub fn pending(db: &Connection) -> DbResult<Vec<Pending>> {
     let mut out = Vec::new();
     for r in live(db)? {
-        let Some(start) = r.pending_start else { continue };
+        let Some(start) = r.pending_start else {
+            continue;
+        };
         if let Some(event) = live_event(db, &r.event_id)? {
             out.push(pending_of(&r, &event, start));
         }
@@ -206,10 +215,17 @@ fn resolve(db: &mut Connection, id: &str, snooze_minutes: Option<i64>) -> DbResu
     let tx = db.transaction()?;
     let device = device_id(&tx)?;
     let (mut r, _) = tx
-        .query_row(&format!("{SELECT} WHERE id = ?1 AND deleted_at IS NULL"), [id], parse)
+        .query_row(
+            &format!("{SELECT} WHERE id = ?1 AND deleted_at IS NULL"),
+            [id],
+            parse,
+        )
         .optional()?
         .ok_or("Không tìm thấy nhắc nhở")?;
-    let start = r.pending_start.take().ok_or("Nhắc nhở không còn chờ xử lý")?;
+    let start = r
+        .pending_start
+        .take()
+        .ok_or("Nhắc nhở không còn chờ xử lý")?;
     let at = now();
     if let Some(minutes) = snooze_minutes {
         r.snooze_until = Some(at + minutes * 60_000);
@@ -245,7 +261,13 @@ mod tests {
         super::super::migrate(&mut db).unwrap();
         db
     }
-    fn add(db: &mut Connection, kind: &str, start: i64, rrule: Option<&str>, before: Option<i64>) -> Event {
+    fn add(
+        db: &mut Connection,
+        kind: &str,
+        start: i64,
+        rrule: Option<&str>,
+        before: Option<i64>,
+    ) -> Event {
         save(
             db,
             EventInput {
@@ -319,7 +341,9 @@ mod tests {
 
         let todo = add(&mut db, "todo", T0 + 3 * day, None, Some(0));
         events::set_done(&mut db, &todo.id, todo.rev, true)?;
-        assert!(fire_due(&mut db, T0 + 3 * day, 0)?.iter().all(|p| p.event_id != todo.id));
+        assert!(fire_due(&mut db, T0 + 3 * day, 0)?
+            .iter()
+            .all(|p| p.event_id != todo.id));
         Ok(())
     }
 
@@ -361,7 +385,11 @@ mod tests {
         events::delete(&mut db, &e.id, e.rev)?;
         assert!(fire_due(&mut db, T0 + 10 * MIN, 0)?.is_empty());
         assert!(minutes_by_event(&db)?.is_empty());
-        let rev: i64 = db.query_row("SELECT MAX(rev) FROM outbox WHERE kind='reminder'", [], |r| r.get(0))?;
+        let rev: i64 = db.query_row(
+            "SELECT MAX(rev) FROM outbox WHERE kind='reminder'",
+            [],
+            |r| r.get(0),
+        )?;
         assert!(rev >= 4);
         Ok(())
     }

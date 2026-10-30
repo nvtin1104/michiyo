@@ -23,6 +23,24 @@ export const Reminder = RecordMetadata.extend({
 export const Activity = RecordMetadata.extend({ kind: z.string(), occurred_at: z.number().int(), data: z.unknown() });
 export const Conversation = RecordMetadata.extend({ title: z.string() });
 export const Message = RecordMetadata.extend({ conversation_id: z.string(), role: z.enum(['user', 'assistant']), content: z.string() });
+export const TelegramBotConfig = z.object({
+  enabled: z.boolean().default(true),
+  allowed_chat_ids: z.array(z.string().regex(/^-?\d+$/)).max(100).default([]),
+  system_prompt: z.string().trim().min(1).max(2000).default('Bạn là Michiyo, trợ lý thân thiện và ngắn gọn.'),
+  model: z.string().trim().max(120).default(''),
+  hourly_limit: z.number().int().min(1).max(500).default(20),
+  allow_workspace_queries: z.boolean().default(true),
+});
+export const TelegramInboxItem = z.object({
+  update_id: z.number().int().nonnegative(),
+  status: z.enum(['received', 'processing', 'sending', 'sent', 'ignored']),
+  received_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+  chat_id: z.string().nullable().optional(),
+  text_preview: z.string().nullable().optional(),
+  reply_preview: z.string().nullable().optional(),
+  error_reason: z.string().nullable().optional(),
+});
 export type Note = z.infer<typeof Note>;
 export type Habit = z.infer<typeof Habit>;
 export type HabitLog = z.infer<typeof HabitLog>;
@@ -31,3 +49,5 @@ export type Reminder = z.infer<typeof Reminder>;
 export type Activity = z.infer<typeof Activity>;
 export type Conversation = z.infer<typeof Conversation>;
 export type Message = z.infer<typeof Message>;
+export type TelegramBotConfig = z.infer<typeof TelegramBotConfig>;
+export type TelegramInboxItem = z.infer<typeof TelegramInboxItem>;

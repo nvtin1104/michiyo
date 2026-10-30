@@ -88,18 +88,30 @@ impl Rule {
             return None;
         }
         by_day.sort_by_key(|d| (d + 6) % 7); // Monday first
-        Some(Self { freq, interval, count, until, by_day })
+        Some(Self {
+            freq,
+            interval,
+            count,
+            until,
+            by_day,
+        })
     }
 }
 
 fn parse_until(value: &str) -> Option<i64> {
     let digits = |s: &str| -> Option<i64> {
-        (s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse().ok()).flatten()
+        (s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| s.parse().ok())
+            .flatten()
     };
     if value.len() < 8 {
         return None;
     }
-    let (y, m, d) = (digits(&value[0..4])?, digits(&value[4..6])?, digits(&value[6..8])?);
+    let (y, m, d) = (
+        digits(&value[0..4])?,
+        digits(&value[4..6])?,
+        digits(&value[6..8])?,
+    );
     let day = days_from_civil(y, m, d);
     if !(1..=12).contains(&m) || civil_from_days(day) != (y, m, d) {
         return None;
@@ -107,7 +119,11 @@ fn parse_until(value: &str) -> Option<i64> {
     match value.len() {
         8 => Some((day + 1) * DAY_MS - 1),
         16 if value.as_bytes()[8] == b'T' && value.ends_with('Z') => {
-            let (h, mi, s) = (digits(&value[9..11])?, digits(&value[11..13])?, digits(&value[13..15])?);
+            let (h, mi, s) = (
+                digits(&value[9..11])?,
+                digits(&value[11..13])?,
+                digits(&value[13..15])?,
+            );
             (h < 24 && mi < 60 && s < 61).then_some(day * DAY_MS + ((h * 60 + mi) * 60 + s) * 1000)
         }
         _ => None,
@@ -127,7 +143,11 @@ fn walk(rule: &Rule, first: i64, emit: &mut dyn FnMut(i64) -> bool) {
             }
         }
         Freq::Weekly => {
-            let by_day = if rule.by_day.is_empty() { vec![weekday(first)] } else { rule.by_day.clone() };
+            let by_day = if rule.by_day.is_empty() {
+                vec![weekday(first)]
+            } else {
+                rule.by_day.clone()
+            };
             let first_monday = (first + 3).div_euclid(7) * 7 - 3;
             let mut monday = first_monday;
             'weeks: while steps < MAX_STEPS {
@@ -143,7 +163,11 @@ fn walk(rule: &Rule, first: i64, emit: &mut dyn FnMut(i64) -> bool) {
         }
         Freq::Monthly | Freq::Yearly => {
             let (year, month, dom) = civil_from_days(first);
-            let step = if rule.freq == Freq::Monthly { rule.interval } else { rule.interval * 12 };
+            let step = if rule.freq == Freq::Monthly {
+                rule.interval
+            } else {
+                rule.interval * 12
+            };
             let mut index = year * 12 + month - 1;
             while steps < MAX_STEPS {
                 let (y, m) = (index.div_euclid(12), index.rem_euclid(12) + 1);
@@ -210,7 +234,11 @@ pub fn occurrences(event: &Event, from: i64, until: i64, tz_offset: i64) -> Vec<
     };
     let overlaps = |start: i64| start < until && start + duration.unwrap_or(0).max(1) > from;
     let Some(rule) = event.rrule.as_deref().and_then(Rule::parse) else {
-        return if overlaps(event.starts_at) { vec![make(event.starts_at)] } else { vec![] };
+        return if overlaps(event.starts_at) {
+            vec![make(event.starts_at)]
+        } else {
+            vec![]
+        };
     };
     let local = event.starts_at + tz_offset * 60_000;
     let first = local.div_euclid(DAY_MS);
@@ -289,7 +317,8 @@ fn write(tx: &Transaction<'_>, event: &Event, activity: &str) -> DbResult<()> {
     )?;
     let id = Ulid::generate().to_string();
     let detail = serde_json::json!({"event_id": event.id, "title": event.title});
-    let stored = serde_json::json!({"kind": activity, "occurred_at": event.updated_at, "data": detail});
+    let stored =
+        serde_json::json!({"kind": activity, "occurred_at": event.updated_at, "data": detail});
     tx.execute(
         "INSERT INTO activity (id, updated_at, deleted_at, device_id, rev, data) VALUES (?1, ?2, NULL, ?3, 1, ?4)",
         params![id, event.updated_at, event.device_id, stored.to_string()],
@@ -313,10 +342,14 @@ pub fn range(db: &Connection, from: i64, until: i64, tz_offset: i64) -> DbResult
     for event in stmt.query_map([], row_event)? {
         let event = event?;
         let minutes = reminders.get(&event.id).copied();
-        all.extend(occurrences(&event, from, until, tz_offset).into_iter().map(|mut o| {
-            o.remind_before = minutes;
-            o
-        }));
+        all.extend(
+            occurrences(&event, from, until, tz_offset)
+                .into_iter()
+                .map(|mut o| {
+                    o.remind_before = minutes;
+                    o
+                }),
+        );
     }
     all.sort_by(|a, b| (a.occurrence_start, &a.event.id).cmp(&(b.occurrence_start, &b.event.id)));
     all.truncate(MAX_OCCURRENCES);
@@ -330,8 +363,13 @@ pub fn save(db: &mut Connection, input: EventInput) -> DbResult<Event> {
         || input.starts_at < 0
         || input.ends_at.is_some_and(|end| end < input.starts_at)
         || (input.kind == "todo" && input.ends_at.is_some())
-        || input.rrule.as_deref().is_some_and(|r| Rule::parse(r).is_none())
-        || input.remind_before.is_some_and(|m| !(0..=super::reminders::MAX_MINUTES_BEFORE).contains(&m));
+        || input
+            .rrule
+            .as_deref()
+            .is_some_and(|r| Rule::parse(r).is_none())
+        || input
+            .remind_before
+            .is_some_and(|m| !(0..=super::reminders::MAX_MINUTES_BEFORE).contains(&m));
     if invalid {
         return Err("Sự kiện không hợp lệ".into());
     }
@@ -363,7 +401,13 @@ pub fn save(db: &mut Connection, input: EventInput) -> DbResult<Event> {
         done: input.done,
     };
     write(&tx, &event, "event_saved")?;
-    super::reminders::set_for_event(&tx, &event.id, input.remind_before, &event.device_id, event.updated_at)?;
+    super::reminders::set_for_event(
+        &tx,
+        &event.id,
+        input.remind_before,
+        &event.device_id,
+        event.updated_at,
+    )?;
     tx.commit()?;
     Ok(event)
 }
@@ -394,7 +438,11 @@ pub fn set_done(db: &mut Connection, id: &str, rev: i64, done: bool) -> DbResult
     event.updated_at = now();
     event.rev += 1;
     event.done = done;
-    write(&tx, &event, if done { "todo_done" } else { "todo_reopened" })?;
+    write(
+        &tx,
+        &event,
+        if done { "todo_done" } else { "todo_reopened" },
+    )?;
     tx.commit()?;
     Ok(event)
 }
@@ -422,7 +470,10 @@ mod tests {
         }
     }
     fn starts(e: &Event, from: i64, until: i64, tz: i64) -> Vec<i64> {
-        occurrences(e, from, until, tz).iter().map(|o| o.occurrence_start).collect()
+        occurrences(e, from, until, tz)
+            .iter()
+            .map(|o| o.occurrence_start)
+            .collect()
     }
 
     #[test]
@@ -440,9 +491,16 @@ mod tests {
         assert!(Rule::parse("FREQ=DAILY;UNTIL=20261231").is_some());
         assert!(Rule::parse("FREQ=DAILY;UNTIL=20261231T235959Z").is_some());
         for bad in [
-            "", "FREQ=HOURLY", "FREQ=DAILY;INTERVAL=0", "FREQ=DAILY;COUNT=0", "FREQ=DAILY;BYDAY=MO",
-            "FREQ=DAILY;COUNT=3;UNTIL=20261231", "FREQ=WEEKLY;BYDAY=XX", "FREQ=DAILY;UNTIL=20261301",
-            "FREQ=DAILY;BYSETPOS=1", "INTERVAL=2",
+            "",
+            "FREQ=HOURLY",
+            "FREQ=DAILY;INTERVAL=0",
+            "FREQ=DAILY;COUNT=0",
+            "FREQ=DAILY;BYDAY=MO",
+            "FREQ=DAILY;COUNT=3;UNTIL=20261231",
+            "FREQ=WEEKLY;BYDAY=XX",
+            "FREQ=DAILY;UNTIL=20261301",
+            "FREQ=DAILY;BYSETPOS=1",
+            "INTERVAL=2",
         ] {
             assert!(Rule::parse(bad).is_none(), "{bad}");
         }
@@ -450,28 +508,55 @@ mod tests {
 
     #[test]
     fn daily_with_count_and_window() {
-        let e = event(at(2026, 10, 28, 9), Some(at(2026, 10, 28, 10)), "FREQ=DAILY;COUNT=3");
+        let e = event(
+            at(2026, 10, 28, 9),
+            Some(at(2026, 10, 28, 10)),
+            "FREQ=DAILY;COUNT=3",
+        );
         let all = starts(&e, at(2026, 10, 1, 0), at(2026, 12, 1, 0), 0);
-        assert_eq!(all, vec![at(2026, 10, 28, 9), at(2026, 10, 29, 9), at(2026, 10, 30, 9)]);
+        assert_eq!(
+            all,
+            vec![
+                at(2026, 10, 28, 9),
+                at(2026, 10, 29, 9),
+                at(2026, 10, 30, 9)
+            ]
+        );
         // COUNT is measured from the first occurrence, not from the window start.
-        assert_eq!(starts(&e, at(2026, 10, 30, 0), at(2026, 12, 1, 0), 0), vec![at(2026, 10, 30, 9)]);
+        assert_eq!(
+            starts(&e, at(2026, 10, 30, 0), at(2026, 12, 1, 0), 0),
+            vec![at(2026, 10, 30, 9)]
+        );
         // An occurrence that started earlier but is still running is included.
-        assert_eq!(starts(&e, at(2026, 10, 28, 9) + 1800_000, at(2026, 10, 28, 12), 0).len(), 1);
+        assert_eq!(
+            starts(&e, at(2026, 10, 28, 9) + 1800_000, at(2026, 10, 28, 12), 0).len(),
+            1
+        );
     }
 
     #[test]
     fn weekly_by_day_with_interval() {
         // Wed 2026-10-28, every other week on Mon and Wed.
-        let e = event(at(2026, 10, 28, 8), None, "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE");
+        let e = event(
+            at(2026, 10, 28, 8),
+            None,
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE",
+        );
         let got = starts(&e, at(2026, 10, 26, 0), at(2026, 11, 20, 0), 0);
-        assert_eq!(got, vec![at(2026, 10, 28, 8), at(2026, 11, 9, 8), at(2026, 11, 11, 8)]);
+        assert_eq!(
+            got,
+            vec![at(2026, 10, 28, 8), at(2026, 11, 9, 8), at(2026, 11, 11, 8)]
+        );
     }
 
     #[test]
     fn monthly_skips_missing_days_and_yearly_leap_day() {
         let e = event(at(2026, 1, 31, 8), None, "FREQ=MONTHLY");
         let got = starts(&e, at(2026, 1, 1, 0), at(2026, 6, 1, 0), 0);
-        assert_eq!(got, vec![at(2026, 1, 31, 8), at(2026, 3, 31, 8), at(2026, 5, 31, 8)]);
+        assert_eq!(
+            got,
+            vec![at(2026, 1, 31, 8), at(2026, 3, 31, 8), at(2026, 5, 31, 8)]
+        );
         let leap = event(at(2024, 2, 29, 8), None, "FREQ=YEARLY");
         assert_eq!(
             starts(&leap, at(2024, 1, 1, 0), at(2033, 1, 1, 0), 0),
@@ -482,13 +567,22 @@ mod tests {
     #[test]
     fn until_and_timezone() {
         let e = event(at(2026, 10, 28, 9), None, "FREQ=DAILY;UNTIL=20261030");
-        assert_eq!(starts(&e, at(2026, 10, 1, 0), at(2026, 12, 1, 0), 0).len(), 3);
+        assert_eq!(
+            starts(&e, at(2026, 10, 1, 0), at(2026, 12, 1, 0), 0).len(),
+            3
+        );
         // 18:00 UTC+7 on Wed 28 is 11:00 UTC; weekly Mon/Wed keeps the local weekday across midnight UTC.
         let tz = 7 * 60;
         let late = event(at(2026, 10, 28, 20), None, "FREQ=WEEKLY;BYDAY=TH");
         // 20:00 UTC is 03:00 local on Thursday 29th, so the first occurrence is that day.
-        assert_eq!(starts(&late, at(2026, 10, 1, 0), at(2026, 11, 10, 0), tz)[0], at(2026, 10, 28, 20));
-        assert_eq!(starts(&late, at(2026, 10, 1, 0), at(2026, 11, 10, 0), tz)[1], at(2026, 11, 4, 20));
+        assert_eq!(
+            starts(&late, at(2026, 10, 1, 0), at(2026, 11, 10, 0), tz)[0],
+            at(2026, 10, 28, 20)
+        );
+        assert_eq!(
+            starts(&late, at(2026, 10, 1, 0), at(2026, 11, 10, 0), tz)[1],
+            at(2026, 11, 4, 20)
+        );
     }
 
     #[test]
@@ -519,8 +613,15 @@ mod tests {
         assert!(done.done);
         assert!(set_done(&mut db, &todo.id, todo.rev, false).is_err());
         delete(&mut db, &meeting.id, meeting.rev)?;
-        assert_eq!(range(&db, at(2026, 10, 28, 0), at(2026, 10, 30, 0), 0)?.len(), 1);
-        let latest: i64 = db.query_row("SELECT MAX(rev) FROM outbox WHERE id=?1 AND kind='event'", [&meeting.id], |r| r.get(0))?;
+        assert_eq!(
+            range(&db, at(2026, 10, 28, 0), at(2026, 10, 30, 0), 0)?.len(),
+            1
+        );
+        let latest: i64 = db.query_row(
+            "SELECT MAX(rev) FROM outbox WHERE id=?1 AND kind='event'",
+            [&meeting.id],
+            |r| r.get(0),
+        )?;
         assert_eq!(latest, 2);
         Ok(())
     }

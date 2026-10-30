@@ -61,13 +61,13 @@ Script kiểm tra nhập Chat, các tab/API key ẩn, phím tắt, lỗi khi g�
 
 **Trạng thái kiểm chứng trên máy triển khai:** build frontend, kiểm tra Svelte/TypeScript và 12 test frontend/Agent SDK đạt. `cargo check` đạt; `cargo test --locked` biên dịch được binary test, nhưng Windows Application Control chặn thực thi binary mới (os error 4551), nên chưa xác nhận các test Rust mới chạy thành công. `npm run test:mascot` kiểm tra bằng Chromium + IPC giả lập: phân biệt chuột trái/phải, không tràn viewport ở DPI 125%, focus ô nhập và hiện câu trả lời trong bong bóng. Kiểm tra này không thay cho native smoke test về trong suốt, menu hệ điều hành và nhiều màn hình. Chưa tạo bộ cài release; không có API key nên chưa kiểm tra chat/dịch có phí với dịch vụ thật.
 
-## Nền tảng đang phát triển
+## Nền tảng 3 tầng (Windows Offline/Data Server · Web Admin + Telegram Bot · Mobile-ready)
 
-Workspace `shared/` chứa schema Zod và kiểu đồng bộ; chạy `npm run build:shared` để biên dịch. `cloud/` là Worker API và `admin/` là giao diện quản trị Cloudflare Pages đang phát triển. Lịch sử chat dùng SQLite qua Rust; lần đầu mở, ứng dụng nhập `history.json` và giữ bản gốc là `history.json.bak` nếu chưa có bản sao. Xem trạng thái từng phase trong `plans/20261028-michiyo-platform/plan.md`.
+Workspace `shared/` chứa schema Zod, kiểu đồng bộ, cấu hình Telegram Bot và `CloudClient` dùng chung; chạy `npm run build:shared` để biên dịch. `cloud/` là Data Server (Cloudflare Worker + D1 + Queues) và `admin/` là giao diện quản trị Cloudflare Pages. Lịch sử chat và dữ liệu không gian làm việc dùng SQLite qua kết nối persistent trong Rust (`Runtime.db`); lần đầu mở, ứng dụng nhập `history.json` và giữ bản gốc là `history.json.bak` nếu chưa có bản sao. Xem trạng thái từng phase trong `plans/20261028-michiyo-platform/plan.md`.
 
-Admin hiện hỗ trợ ghép nối, đổi tên/thu hồi thiết bị, quản lý khóa, xem lượt dùng gần đây và xem/xuất dữ liệu đồng bộ theo loại. Xuất JSON giới hạn 10.000 bản ghi mỗi loại, không phải snapshot nhất quán nếu dữ liệu đổi trong lúc xuất. Chạy `npm run check --workspace @michiyo/admin` và `npm run build --workspace @michiyo/admin`; `npm run test:admin` cần server `npm run dev --workspace @michiyo/admin -- --host 127.0.0.1 --port 4174` và sử dụng API giả lập. Với Pages thật, cấu hình service binding `MICHIYO_API` tới Worker, đặt Cloudflare Access trước admin và cấu hình `ACCESS_TEAM_DOMAIN` cùng `ACCESS_AUD` trên Worker sao cho JWT từ ứng dụng Access đó được Worker xác minh. Dev server thông thường không cung cấp service binding hay phiên Access nên không vận hành API thật. Token `DEV_ADMIN_TOKEN` chỉ được chấp nhận khi `ENVIRONMENT=development`; production mặc định đặt `ENVIRONMENT=production`. Không đặt token dev trong production. Chưa kiểm chứng triển khai Pages/Access thật.
-
-Bot chuyển sang Telegram. Webhook `POST /v1/telegram/webhook` kiểm tra secret, giới hạn payload và đưa update vào Queue; consumer lưu inbox theo `update_id`, cron xóa payload sau 30 ngày (cộng tối đa một chu kỳ cron). Cấu hình Queue và dead-letter queue trong `cloud/wrangler.jsonc`, tạo resource, áp dụng migration, đặt secret `TELEGRAM_WEBHOOK_SECRET` và đăng ký webhook Telegram với cùng `secret_token`. Bot hỗ trợ /start và trả lời AI trong chat riêng có ID được cho phép. Cấu hình `TELEGRAM_BOT_TOKEN` và `TELEGRAM_ALLOWED_CHAT_IDS` trước khi bật. Admin hiển thị số update theo trạng thái. Gửi tin theo nguyên tắc tối đa một lần: trạng thái `sending` có thể đã gửi nhưng chưa xác nhận và cần kiểm tra thủ công. Admin có thể xem và thử lại lỗi xử lý trước khi gửi hoặc đánh dấu lượt gửi chưa xác nhận; dead-letter do lỗi lưu database vẫn cần xử lý riêng. Chưa có flow builder và chưa kiểm thử với Telegram thật.
+- **App Windows (`src/` + `src-tauri/`):** Hỗ trợ chạy độc lập hoàn toàn ở chế độ **Offline** (SQLite cục bộ + Ollama/LM Studio/LibreTranslate localhost, ngắt hoàn toàn đồng bộ nền) hoặc kết nối vào **Data Server** ở chế độ **Online / Hybrid** qua device token (`md_…`). Tầng giao diện gọi qua `WorkspaceAdapter` (`src/lib/workspace-api.ts`), tách biệt khỏi các lệnh đặc thù Windows Desktop để sẵn sàng tái sử dụng cho **App Mobile** về sau (Tauri 2 Mobile hoặc Mobile Web Client dùng `CloudClient` trong `@michiyo/shared`).
+- **Web Admin (`admin/`) & Data Server (`cloud/`):** Hỗ trợ ghép nối, đổi tên/thu hồi thiết bị, quản lý khóa, xem lượt dùng gần đây, xem/xuất dữ liệu đồng bộ theo loại (giới hạn 10.000 bản ghi mỗi loại) và **quản trị động Telegram Bot** (`GET/PUT /v1/admin/telegram/config`). Chạy `npm run check --workspace @michiyo/admin` và `npm run build --workspace @michiyo/admin`; `npm run test:admin` cần server `npm run dev --workspace @michiyo/admin -- --host 127.0.0.1 --port 4174` và sử dụng API giả lập. Với Pages thật, cấu hình service binding `MICHIYO_API` tới Worker, đặt Cloudflare Access trước admin và cấu hình `ACCESS_TEAM_DOMAIN` cùng `ACCESS_AUD` trên Worker. Token `DEV_ADMIN_TOKEN` chỉ được chấp nhận khi `ENVIRONMENT=development`.
+- **Telegram Bot tích hợp Data Server:** Webhook `POST /v1/telegram/webhook` kiểm tra secret, giới hạn payload và đưa update vào Queue; consumer lưu inbox theo `update_id`, cron xóa payload sau 30 ngày. Cấu hình động (bật/tắt bot, danh sách `allowed_chat_ids`, `model`, `system_prompt`, `hourly_limit`, `allow_workspace_queries`) được lưu trong bảng `telegram_config` trên D1 và chỉnh trực tiếp từ Web Admin (fallback về `TELEGRAM_ALLOWED_CHAT_IDS` nếu chưa cấu hình). Khi bật quyền truy vấn dữ liệu, bot hỗ trợ `/start`, `/today` (lịch & việc cần làm hôm nay), `/habits` (danh sách thói quen), `/notes [từ khóa]` (tìm ghi chú), và `/note <nội dung>` (tạo ghi chú mới trực tiếp vào `sync_records` để đồng bộ về Windows/Mobile), cùng trả lời AI trong chat riêng được phép.
 
 Migration cloud đã được gộp thành baseline mới và yêu cầu D1 trống. Dữ liệu, lịch sử migration và token thiết bị cũ không được chuyển đổi: tạo database mới, cấu hình lại binding và ghép nối lại thiết bị. Để bắt đầu hoàn toàn từ đầu, cần reset dữ liệu cục bộ trên từng thiết bị trước khi đồng bộ lại; nếu không, dữ liệu cũ có thể được tải lên cloud.
 
@@ -76,17 +76,22 @@ Hạn mức API key đếm mỗi yêu cầu AI hợp lệ được nhận, kể 
 ## Kiến trúc
 
 ```text
+shared/            Schema Zod, giao thức sync, cấu hình Telegram Bot, CloudClient đa nền tảng
 src/
-  mascot/          Pixi, animation, state machine và test
+  mascot/          Pixi, animation, state machine, wander controller và test
+  shell/           App Shell, Home dashboard, ReminderBar
   chat/            Chat UI, markdown, lịch sử, streaming events
   translate/       Popup dịch, copy, hỏi thêm
   settings/        6 tab cài đặt
-  lib/             IPC, cấu hình mặc định, i18n, validation
+  lib/             IPC, WorkspaceAdapter (desktop/mobile), cấu hình mặc định, i18n, validation
 src-tauri/src/
-  commands/        Chat, dịch, shortcut, cửa sổ, capture, nạp skin
+  commands/        Tách module: workspace (CRUD), ai (chat/dịch/cloud), desktop (cửa sổ/shortcut/capture), motion, skins
+  db/              SQLite + FTS5, outbox, sync merge, reminders, habits, events, notes, activity
   providers/       Translator trait, 4 engine, Rust ↔ Agent SDK bridge, HTTP mock tests
   config/          tauri-plugin-store
   secrets/         OS keychain qua keyring
+cloud/             Cloudflare Worker (Hono, D1, Queues, Workers AI): Data Server, Sync API, Telegram Bot
+admin/             SvelteKit Cloudflare Pages: Quản trị thiết bị, API, dữ liệu đồng bộ và Telegram Bot
 agent/             Worker TypeScript gọi Claude Agent SDK + test
 public/skins/      Skin mẫu nguyên bản
 scripts/           Sinh sprite, Tauri wrapper, UI verification

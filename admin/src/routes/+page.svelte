@@ -5,6 +5,22 @@
   type Provider = { provider: string; updated_at: number };
   type Usage = { day: string; route: string; model: string; requests: number };
   type SyncPage = { records: Record<string, unknown>[]; cursor: string; more: boolean };
+  type BotConfig = {
+    enabled: boolean;
+    allowed_chat_ids: string[];
+    system_prompt: string;
+    model: string;
+    hourly_limit: number;
+    allow_workspace_queries: boolean;
+    updated_at?: number;
+  };
+  type BotEnvironment = {
+    token_configured: boolean;
+    webhook_secret_configured: boolean;
+    queue_configured: boolean;
+    allowed_models: string[];
+  };
+
   let section = 'devices';
   let devices: Device[] = [], keys: Key[] = [], providers: Provider[] = [], usage: Usage[] = [];
   let error = '', message = '', deviceName = '', keyName = '', provider = 'openai', providerKey = '';
@@ -13,6 +29,16 @@
   let busy = false;
   let botStatuses: { status: string; count: number }[] = [];
   let botIssues: { update_id: number; status: string; received_at: number; updated_at: number }[] = [];
+  let botConfig: BotConfig = {
+    enabled: true,
+    allowed_chat_ids: [],
+    system_prompt: 'Bạn là Michiyo, trợ lý thân thiện và ngắn gọn.',
+    model: '',
+    hourly_limit: 20,
+    allow_workspace_queries: true,
+  };
+  let botChatIdsInput = '';
+  let botEnv: BotEnvironment | null = null;
   let dataType = 'note', dataPage: SyncPage | null = null, dataCursor = '0';
   const date = (value: number | null) => value ? new Date(value).toLocaleString('vi-VN') : 'Chưa hoạt động';
 
@@ -65,8 +91,40 @@
     dataCursor = cursor;
   }
   async function loadBot() {
-    const [result, issues] = await Promise.all([api<{ statuses: { status: string; count: number }[] }>('admin/telegram/summary'), api<{ issues: typeof botIssues }>('admin/telegram/issues')]);
-    botStatuses = result.statuses; botIssues = issues.issues;
+    const [result, issues, cfg] = await Promise.all([
+      api<{ statuses: { status: string; count: number }[] }>('admin/telegram/summary'),
+      api<{ issues: typeof botIssues }>('admin/telegram/issues'),
+      api<{ config: BotConfig; environment?: BotEnvironment }>('admin/telegram/config').catch(() => ({ config: botConfig, environment: undefined })),
+    ]);
+    botStatuses = result.statuses;
+    botIssues = issues.issues;
+    if (cfg?.config) {
+      botConfig = cfg.config;
+      botChatIdsInput = (cfg.config.allowed_chat_ids ?? []).join(', ');
+    }
+    if (cfg?.environment) {
+      botEnv = cfg.environment;
+    }
+  }
+  async function saveBot() {
+    const ids = botChatIdsInput
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.some((id) => !/^-?\d+$/.test(id))) {
+      throw new Error('Chat ID chỉ được chứa chữ số (có thể bắt đầu bằng dấu trừ).');
+    }
+    const result = await api<{ config: BotConfig }>('admin/telegram/config', 'PUT', {
+      enabled: botConfig.enabled,
+      allowed_chat_ids: ids,
+      system_prompt: botConfig.system_prompt,
+      model: botConfig.model,
+      hourly_limit: Number(botConfig.hourly_limit) || 20,
+      allow_workspace_queries: botConfig.allow_workspace_queries,
+    });
+    botConfig = result.config;
+    botChatIdsInput = (result.config.allowed_chat_ids ?? []).join(', ');
+    message = 'Đã lưu cấu hình Telegram Bot.';
   }
   async function botIssue(id: number, operation: 'retry' | 'resolve') {
     await api(`admin/telegram/issues/${id}/${operation}`, 'POST');
@@ -99,9 +157,9 @@
     {#if error}<p class="notice error" role="alert">{error}</p>{/if}
     {#if message}<p class="notice" role="status">{message}</p>{/if}
     {#if section === 'overview'}
-      <section class="card"><h2>Hoạt động gần đây</h2><div class="item"><span>Thiết bị hoạt động trong 2 phút</span><strong>{devices.filter((d) => !d.revoked_at && d.last_seen !== null && Date.now() - d.last_seen < 120000).length}</strong></div><div class="item"><span>Lượt AI trong 7 ngày gần đây</span><strong>{usage.reduce((sum, row) => sum + row.requests, 0)}</strong></div><p>Chi phí, lỗi và tin nhắn bot chưa có dữ liệu.</p></section>
+      <section class="card"><h2>Hoạt động gần đây</h2><div class="item"><span>Thiết bị hoạt động trong 2 phút</span><strong>{devices.filter((d) => !d.revoked_at && d.last_seen !== null && Date.now() - d.last_seen < 120000).length}</strong></div><div class="item"><span>Lượt AI trong 7 ngày gần đây</span><strong>{usage.reduce((sum, row) => sum + row.requests, 0)}</strong></div><p>Dữ liệu thiết bị từ App Windows/Mobile và Telegram Bot được quản lý tập trung tại Data Server.</p></section>
     {:else if section === 'devices'}
-      <section class="card"><h2>Ghép nối thiết bị</h2><p>Tạo mã và nhập mã đó trong cài đặt Michiyo trên desktop.</p>
+      <section class="card"><h2>Ghép nối thiết bị</h2><p>Tạo mã và nhập mã đó trong cài đặt Michiyo trên desktop hoặc mobile.</p>
         <form onsubmit={(e) => { e.preventDefault(); void action(pair); }}><label for="device-name">Tên thiết bị</label><div class="row"><input id="device-name" bind:value={deviceName} maxlength="60" placeholder="Máy tính của tôi" /><button disabled={busy}>Tạo mã</button></div></form>
         {#if pairingCode}<div class="secret"><strong>{pairingCode}</strong><span>Hết hạn: {date(pairingExpiry)}</span><button class="secondary" onclick={() => pairingCode = ''}>Đóng</button></div>{/if}
       </section>
@@ -125,6 +183,41 @@
         {#each dataPage?.records ?? [] as record}<pre>{JSON.stringify(record, null, 2)}</pre>{/each}
       </section>
     {:else if section === 'bot'}
+      <section class="card">
+        <h2>Cấu hình Telegram Bot</h2>
+        <p>Quản lý phản hồi tự động và kết nối dữ liệu Data Server cho Telegram Bot.</p>
+        {#if botEnv}
+          <div class="item">
+            <span>Biến môi trường Worker</span>
+            <strong>
+              Token: {botEnv.token_configured ? 'Đã đặt' : 'Thiếu'} · Webhook Secret: {botEnv.webhook_secret_configured ? 'Đã đặt' : 'Thiếu'} · Queue: {botEnv.queue_configured ? 'Sẵn sàng' : 'Thiếu'}
+            </strong>
+          </div>
+        {/if}
+        <form onsubmit={(e) => { e.preventDefault(); void action(saveBot); }}>
+          <div class="checks">
+            <label><input type="checkbox" bind:checked={botConfig.enabled} /> Bật phản hồi Telegram Bot</label>
+            <label><input type="checkbox" bind:checked={botConfig.allow_workspace_queries} /> Cho phép lệnh dữ liệu (/today, /habits, /notes, /note)</label>
+          </div>
+          <label for="bot-chat-ids">Chat ID được phép (phân cách bằng dấu phẩy)</label>
+          <input id="bot-chat-ids" bind:value={botChatIdsInput} placeholder="123456789, 987654321" />
+          <label for="bot-model">Model AI</label>
+          {#if botEnv?.allowed_models?.length}
+            <select id="bot-model" bind:value={botConfig.model}>
+              {#each botEnv.allowed_models as m}
+                <option value={m}>{m}</option>
+              {/each}
+            </select>
+          {:else}
+            <input id="bot-model" bind:value={botConfig.model} placeholder="@cf/meta/llama-3.1-8b-instruct" />
+          {/if}
+          <label for="bot-limit">Giới hạn tin nhắn AI mỗi giờ / mỗi chat</label>
+          <input id="bot-limit" type="number" min="1" max="500" step="1" bind:value={botConfig.hourly_limit} />
+          <label for="bot-prompt">System Prompt</label>
+          <textarea id="bot-prompt" rows="3" maxlength="2000" bind:value={botConfig.system_prompt}></textarea>
+          <button disabled={busy}>Lưu cấu hình Bot</button>
+        </form>
+      </section>
       <section class="card"><h2>Trạng thái Telegram</h2><p>Chỉ trả lời chat riêng được cấu hình. Trạng thái sending có thể đã gửi nhưng chưa xác nhận; kiểm tra trước khi xử lý lại.</p>
         {#if !botStatuses.length}<p>Chưa có update.</p>{/if}
         {#each botStatuses as item}<div class="item"><span>{item.status}</span><strong>{item.count}</strong></div>{/each}
@@ -139,5 +232,5 @@
 </div>
 
 <style>
-  :global(*){box-sizing:border-box}:global(body){margin:0;font:15px system-ui,sans-serif;color:#24362d;background:#f3f6ef} .layout{display:flex;min-height:100vh} aside{width:220px;background:#20392c;color:white;padding:30px 18px;flex-shrink:0}.brand{font-size:23px;font-weight:750;margin-bottom:34px}.brand small{font-size:12px;color:#b5d5bd}nav{display:grid;gap:7px}nav button{text-align:left;color:#dcecdf;background:transparent}nav button.active{background:#456b50;color:white}main{width:min(900px,100%);padding:38px 48px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}h1{font-size:30px;margin:4px 0}h2{font-size:19px;margin:0 0 8px}.eyebrow{font-size:11px;letter-spacing:.14em;color:#6e8877;font-weight:700}.card{background:#fff;border:1px solid #dce7da;border-radius:14px;padding:24px;margin:0 0 18px;box-shadow:0 4px 18px #23452b0a}p{color:#667a6b;line-height:1.5;margin:6px 0 16px}label{display:block;font-weight:600;margin:14px 0 6px}input:not([type=checkbox]),select{width:100%;padding:10px;border:1px solid #cbd9cb;border-radius:7px;font:inherit;background:white}button{border:0;border-radius:7px;padding:10px 14px;background:#367347;color:#fff;font:inherit;font-weight:600;cursor:pointer}button:disabled{opacity:.5;cursor:default}.secondary{background:#eaf1e9;color:#34543b}.danger{background:#fff0ee;color:#a53232}form>button{margin-top:15px}.row{display:flex;gap:8px;flex-wrap:wrap}.row input{flex:1;min-width:0}.item{border-top:1px solid #edf2eb;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0}.item p{margin:4px 0 0;font-size:13px}pre{background:#f3f7f1;border-radius:7px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}.secret{display:grid;gap:10px;margin-top:16px;padding:15px;background:#eef8e9;border-radius:8px;overflow-wrap:anywhere}.secret strong{font-size:24px;letter-spacing:.15em}.secret button{justify-self:start}.checks{display:flex;gap:20px}.checks label{font-weight:400}.notice{padding:12px;background:#e6f4e7;border-radius:8px}.error{background:#fff0ee;color:#9d2929}@media(max-width:650px){.layout{display:block}aside{width:auto;padding:18px}.brand{margin:0 0 14px}nav{display:flex;flex-wrap:wrap}main{padding:24px 16px}.item{align-items:flex-start;flex-wrap:wrap}}
+  :global(*){box-sizing:border-box}:global(body){margin:0;font:15px system-ui,sans-serif;color:#24362d;background:#f3f6ef} .layout{display:flex;min-height:100vh} aside{width:220px;background:#20392c;color:white;padding:30px 18px;flex-shrink:0}.brand{font-size:23px;font-weight:750;margin-bottom:34px}.brand small{font-size:12px;color:#b5d5bd}nav{display:grid;gap:7px}nav button{text-align:left;color:#dcecdf;background:transparent}nav button.active{background:#456b50;color:white}main{width:min(900px,100%);padding:38px 48px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}h1{font-size:30px;margin:4px 0}h2{font-size:19px;margin:0 0 8px}.eyebrow{font-size:11px;letter-spacing:.14em;color:#6e8877;font-weight:700}.card{background:#fff;border:1px solid #dce7da;border-radius:14px;padding:24px;margin:0 0 18px;box-shadow:0 4px 18px #23452b0a}p{color:#667a6b;line-height:1.5;margin:6px 0 16px}label{display:block;font-weight:600;margin:14px 0 6px}input:not([type=checkbox]),select,textarea{width:100%;padding:10px;border:1px solid #cbd9cb;border-radius:7px;font:inherit;background:white}button{border:0;border-radius:7px;padding:10px 14px;background:#367347;color:#fff;font:inherit;font-weight:600;cursor:pointer}button:disabled{opacity:.5;cursor:default}.secondary{background:#eaf1e9;color:#34543b}.danger{background:#fff0ee;color:#a53232}form>button{margin-top:15px}.row{display:flex;gap:8px;flex-wrap:wrap}.row input{flex:1;min-width:0}.item{border-top:1px solid #edf2eb;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0}.item p{margin:4px 0 0;font-size:13px}pre{background:#f3f7f1;border-radius:7px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}.secret{display:grid;gap:10px;margin-top:16px;padding:15px;background:#eef8e9;border-radius:8px;overflow-wrap:anywhere}.secret strong{font-size:24px;letter-spacing:.15em}.secret button{justify-self:start}.checks{display:flex;gap:20px;flex-wrap:wrap}.checks label{font-weight:400}.notice{padding:12px;background:#e6f4e7;border-radius:8px}.error{background:#fff0ee;color:#9d2929}@media(max-width:650px){.layout{display:block}aside{width:auto;padding:18px}.brand{margin:0 0 14px}nav{display:flex;flex-wrap:wrap}main{padding:24px 16px}.item{align-items:flex-start;flex-wrap:wrap}}
 </style>

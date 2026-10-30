@@ -147,26 +147,38 @@ fn main() {
                     let _ = setup_handle.emit("config-error", e);
                 }
             });
-            // Poll only the tiny mascot hit mask; ignore transparent pixels even when click-through is active.
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_millis(60));
-                let Some(w) = h.get_webview_window("mascot") else {
-                    break;
-                };
-                if !w.is_visible().unwrap_or(false) {
-                    continue;
-                }
-                if let (Ok(cursor), Ok(p), Ok(size)) =
-                    (w.cursor_position(), w.outer_position(), w.inner_size())
-                {
-                    let x = ((cursor.x - p.x as f64) * 160. / size.width as f64).floor() as i32;
-                    let y = ((cursor.y - p.y as f64) * 160. / size.height as f64).floor() as i32;
-                    let _ = w.emit("mascot-pointer", serde_json::json!({"x":x,"y":y}));
-                    let runtime = h.state::<commands::Runtime>();
-                    let mask = runtime.mask.lock().unwrap();
-                    let hit =
-                        x >= 0 && x < 160 && y >= 0 && y < 160 && mask[(y * 160 + x) as usize];
-                    let _ = w.set_ignore_cursor_events(!hit);
+            // Poll only the tiny mascot hit mask; emit pointer/hit events only when values change.
+            std::thread::spawn(move || {
+                let mut last_point: Option<(i32, i32)> = None;
+                let mut last_hit: Option<bool> = None;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    let Some(w) = h.get_webview_window("mascot") else {
+                        break;
+                    };
+                    if !w.is_visible().unwrap_or(false) {
+                        continue;
+                    }
+                    if let (Ok(cursor), Ok(p), Ok(size)) =
+                        (w.cursor_position(), w.outer_position(), w.inner_size())
+                    {
+                        let x = ((cursor.x - p.x as f64) * 160. / size.width as f64).floor() as i32;
+                        let y =
+                            ((cursor.y - p.y as f64) * 160. / size.height as f64).floor() as i32;
+                        if last_point != Some((x, y)) {
+                            last_point = Some((x, y));
+                            let _ = w.emit("mascot-pointer", serde_json::json!({"x":x,"y":y}));
+                        }
+                        let runtime = h.state::<commands::Runtime>();
+                        let mask = runtime.mask.lock().unwrap();
+                        let hit =
+                            x >= 0 && x < 160 && y >= 0 && y < 160 && mask[(y * 160 + x) as usize];
+                        drop(mask);
+                        if last_hit != Some(hit) {
+                            last_hit = Some(hit);
+                            let _ = w.set_ignore_cursor_events(!hit);
+                        }
+                    }
                 }
             });
             let h = app.handle().clone();
@@ -175,16 +187,13 @@ fn main() {
                 let mut watching = false;
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(900));
-                    if h.state::<commands::Runtime>()
-                        .capturing
-                        .load(std::sync::atomic::Ordering::SeqCst)
-                    {
+                    let runtime = h.state::<commands::Runtime>();
+                    if runtime.capturing.load(std::sync::atomic::Ordering::SeqCst) {
                         continue;
                     }
-                    if config::read(&h)
-                        .ok()
-                        .and_then(|c| c["clipboardWatch"].as_bool())
-                        != Some(true)
+                    if !runtime
+                        .clipboard_watch
+                        .load(std::sync::atomic::Ordering::SeqCst)
                     {
                         watching = false;
                         continue;
@@ -196,12 +205,7 @@ fn main() {
                                 watching = true;
                                 continue;
                             }
-                            let ignored = h
-                                .state::<commands::Runtime>()
-                                .ignored_clipboard
-                                .lock()
-                                .unwrap()
-                                .take();
+                            let ignored = runtime.ignored_clipboard.lock().unwrap().take();
                             if ignored.as_ref() == Some(&text) {
                                 last = text;
                                 continue;
@@ -209,10 +213,7 @@ fn main() {
                             if text != last && !text.trim().is_empty() {
                                 last = text.clone();
                                 let _ = commands::show_panel(&h, "translate", true);
-                                *h.state::<commands::Runtime>()
-                                    .pending_selection
-                                    .lock()
-                                    .unwrap() = Some(text);
+                                *runtime.pending_selection.lock().unwrap() = Some(text);
                                 let _ = h.emit_to("translate", "selection", ());
                             }
                         }
@@ -230,16 +231,32 @@ fn main() {
                 if !runtime.move_save_active.swap(true, Ordering::SeqCst) {
                     let h = h.clone();
                     std::thread::spawn(move || loop {
-                        let generation = h.state::<commands::Runtime>().move_generation.load(Ordering::SeqCst);
+                        let generation = h
+                            .state::<commands::Runtime>()
+                            .move_generation
+                            .load(Ordering::SeqCst);
                         std::thread::sleep(std::time::Duration::from_millis(160));
-                        if h.state::<commands::Runtime>().move_generation.load(Ordering::SeqCst) != generation || commands::motion::mascot_mouse_down() { continue; }
+                        if h.state::<commands::Runtime>()
+                            .move_generation
+                            .load(Ordering::SeqCst)
+                            != generation
+                            || commands::motion::mascot_mouse_down()
+                        {
+                            continue;
+                        }
                         let _ = commands::save_mascot_position(h.clone());
                         if let Some(chat) = h.get_webview_window("chat") {
-                            if chat.is_visible().unwrap_or(false) { let _ = commands::position_panel(&h, &chat, false); }
+                            if chat.is_visible().unwrap_or(false) {
+                                let _ = commands::position_panel(&h, &chat, false);
+                            }
                         }
                         let runtime = h.state::<commands::Runtime>();
                         runtime.move_save_active.store(false, Ordering::SeqCst);
-                        if runtime.move_generation.load(Ordering::SeqCst) == generation || runtime.move_save_active.swap(true, Ordering::SeqCst) { break; }
+                        if runtime.move_generation.load(Ordering::SeqCst) == generation
+                            || runtime.move_save_active.swap(true, Ordering::SeqCst)
+                        {
+                            break;
+                        }
                     });
                 }
             }

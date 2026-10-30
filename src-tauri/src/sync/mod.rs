@@ -38,11 +38,18 @@ fn now_ms() -> i64 {
 
 fn target(app: &tauri::AppHandle) -> Option<Target> {
     let c = config::read(app).ok()?;
-    let url = config::string(&c, "cloudUrl", "").trim().trim_end_matches('/').to_string();
+    let url = config::string(&c, "cloudUrl", "")
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
     if ai::mode(&c) == "offline" || url.is_empty() || ai::validate_base(&url).is_err() {
         return None;
     }
-    Some(Target { url, token: secrets::get("cloud").ok()?, kinds: local::kinds_for(&c["syncScopes"]) })
+    Some(Target {
+        url,
+        token: secrets::get("cloud").ok()?,
+        kinds: local::kinds_for(&c["syncScopes"]),
+    })
 }
 
 fn event_for(kind: &str) -> &'static str {
@@ -73,25 +80,41 @@ fn refs(value: &Value) -> Vec<Ref> {
         .map(|items| {
             items
                 .iter()
-                .filter_map(|r| Some(Ref { kind: r["type"].as_str()?.into(), id: r["id"].as_str()?.into(), rev: r["rev"].as_i64()? }))
+                .filter_map(|r| {
+                    Some(Ref {
+                        kind: r["type"].as_str()?.into(),
+                        id: r["id"].as_str()?.into(),
+                        rev: r["rev"].as_i64()?,
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default()
 }
 
-fn with_db<T>(app: &tauri::AppHandle, work: impl FnOnce(&mut rusqlite::Connection) -> crate::db::DbResult<T>) -> Result<T, String> {
+fn with_db<T>(
+    app: &tauri::AppHandle,
+    work: impl FnOnce(&mut rusqlite::Connection) -> crate::db::DbResult<T>,
+) -> Result<T, String> {
     let state = app.state::<commands::Runtime>();
-    let _guard = state.history_lock.lock().map_err(|_| "Không đọc được dữ liệu".to_string())?;
-    let mut db = commands::local_db(app)?;
-    work(&mut db).map_err(|_| "Không đồng bộ được dữ liệu cục bộ".to_string())
+    commands::with_local_db(app, &state, "Không đọc được dữ liệu", |db| {
+        work(db).map_err(|_| "Không đồng bộ được dữ liệu cục bộ".to_string())
+    })
 }
 
 async fn send(request: reqwest::RequestBuilder, target: &Target) -> Result<Value, String> {
-    let response = request.bearer_auth(&target.token).send().await.map_err(|_| unreachable())?;
+    let response = request
+        .bearer_auth(&target.token)
+        .send()
+        .await
+        .map_err(|_| unreachable())?;
     if !response.status().is_success() {
         return Err(error_text(response.status()));
     }
-    response.json().await.map_err(|_| "Phản hồi đồng bộ không hợp lệ".to_string())
+    response
+        .json()
+        .await
+        .map_err(|_| "Phản hồi đồng bộ không hợp lệ".to_string())
 }
 
 async fn exchange(app: &tauri::AppHandle, target: &Target) -> Result<(), String> {
@@ -102,8 +125,17 @@ async fn exchange(app: &tauri::AppHandle, target: &Target) -> Result<(), String>
         if items.is_empty() {
             break;
         }
-        let records: Vec<Value> = items.iter().map(|i| json!({"type": i.reference.kind, "record": i.record})).collect();
-        let reply = send(client.post(format!("{}/v1/sync/push", target.url)).json(&json!({"records": records})), target).await?;
+        let records: Vec<Value> = items
+            .iter()
+            .map(|i| json!({"type": i.reference.kind, "record": i.record}))
+            .collect();
+        let reply = send(
+            client
+                .post(format!("{}/v1/sync/push", target.url))
+                .json(&json!({"records": records})),
+            target,
+        )
+        .await?;
         let (accepted, rejected) = (refs(&reply["accepted"]), refs(&reply["rejected"]));
         with_db(app, |db| {
             local::mark_pushed(db, &accepted)?;
@@ -116,12 +148,26 @@ async fn exchange(app: &tauri::AppHandle, target: &Target) -> Result<(), String>
     }
     for _ in 0..40 {
         let cursor = with_db(app, |db| local::cursor(db, &target.kinds))?;
-        let reply = send(client.get(format!("{}/v1/sync/pull", target.url)).query(&[("cursor", cursor.as_str())]), target).await?;
+        let reply = send(
+            client
+                .get(format!("{}/v1/sync/pull", target.url))
+                .query(&[("cursor", cursor.as_str())]),
+            target,
+        )
+        .await?;
         let records: Vec<(String, Value)> = reply["records"]
             .as_array()
-            .map(|a| a.iter().filter_map(|r| Some((r["type"].as_str()?.to_string(), r["record"].clone()))).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|r| Some((r["type"].as_str()?.to_string(), r["record"].clone())))
+                    .collect()
+            })
             .unwrap_or_default();
-        let next = reply["cursor"].as_str().filter(|c| c.parse::<u64>().is_ok()).ok_or("Phản hồi đồng bộ không hợp lệ")?.to_string();
+        let next = reply["cursor"]
+            .as_str()
+            .filter(|c| c.parse::<u64>().is_ok())
+            .ok_or("Phản hồi đồng bộ không hợp lệ")?
+            .to_string();
         let applied = with_db(app, |db| {
             let report = local::apply_remote(db, &records, &target.kinds)?;
             local::set_state(db, "pull_cursor", &next)?;
@@ -139,8 +185,13 @@ async fn exchange(app: &tauri::AppHandle, target: &Target) -> Result<(), String>
 
 /// One full push-then-pull cycle. `Ok(false)` means sync is switched off.
 pub async fn run_once(app: &tauri::AppHandle) -> Result<bool, String> {
-    let Some(target) = target(app) else { return Ok(false) };
-    if RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+    let Some(target) = target(app) else {
+        return Ok(false);
+    };
+    if RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         return Err("Đang đồng bộ".into());
     }
     let result = exchange(app, &target).await;
@@ -164,7 +215,9 @@ pub fn status(app: &tauri::AppHandle) -> Result<Status, String> {
     with_db(app, |db| {
         Ok(Status {
             enabled: target.is_some(),
-            pending: target.as_ref().map_or(0, |t| local::pending_count(db, &t.kinds).unwrap_or(0)),
+            pending: target
+                .as_ref()
+                .map_or(0, |t| local::pending_count(db, &t.kinds).unwrap_or(0)),
             last_sync_at: local::state(db, "last_sync_at")?.and_then(|v| v.parse().ok()),
             last_error: local::state(db, "last_error")?,
             syncing: RUNNING.load(Ordering::SeqCst),
@@ -198,7 +251,9 @@ pub fn start(app: tauri::AppHandle) {
             if Instant::now() < hold_until {
                 continue;
             }
-            let queued = status(&app).map(|s| s.enabled && s.pending > 0).unwrap_or(false);
+            let queued = status(&app)
+                .map(|s| s.enabled && s.pending > 0)
+                .unwrap_or(false);
             if !queued && last_full.elapsed() < FULL_SYNC_EVERY {
                 continue;
             }

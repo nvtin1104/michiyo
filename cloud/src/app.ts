@@ -4,7 +4,7 @@ import { decrypt, encrypt, normalizeCode, pairingCode, randomToken, sha256Hex } 
 import { allowedModels, DEFAULT_MODEL, EMBED_MODEL, type Env } from './env';
 import { toOpenAiStream } from './stream';
 import { pull, push, SyncError } from './sync';
-import { receiveWebhook } from './telegram';
+import { getBotConfig, receiveWebhook, saveBotConfig } from './telegram';
 
 type Principal = { kind: 'device'; id: string } | { kind: 'key'; id: string; scopes: string[]; dailyLimit: number | null };
 type Vars = { principal: Principal; admin: string };
@@ -93,7 +93,6 @@ function requireScope(scope: string) {
     if (!principal) return fail(c, 401, 'unauthorized');
     if (principal.kind === 'key') {
       if (!principal.scopes.includes(scope)) return fail(c, 403, 'forbidden');
-
     }
     c.set('principal', principal);
     return next();
@@ -332,6 +331,30 @@ admin.get('/usage', async (c) => {
 admin.get('/telegram/summary', async (c) => {
   const { results } = await c.env.DB.prepare('SELECT status, COUNT(*) AS count FROM telegram_webhook_inbox GROUP BY status').all();
   return c.json({ statuses: results });
+});
+
+admin.get('/telegram/config', async (c) => {
+  const config = await getBotConfig(c.env);
+  c.header('Cache-Control', 'no-store');
+  return c.json({
+    config,
+    environment: {
+      token_configured: Boolean(c.env.TELEGRAM_BOT_TOKEN),
+      webhook_secret_configured: Boolean(c.env.TELEGRAM_WEBHOOK_SECRET),
+      queue_configured: Boolean(c.env.TELEGRAM_QUEUE),
+      allowed_models: allowedModels(c.env),
+    },
+  });
+});
+
+admin.put('/telegram/config', async (c) => {
+  try {
+    const config = await saveBotConfig(c.env, await c.req.json().catch(() => null));
+    return c.json({ config });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'invalid_config';
+    return fail(c, 400, msg);
+  }
 });
 
 admin.get('/telegram/issues', async (c) => {

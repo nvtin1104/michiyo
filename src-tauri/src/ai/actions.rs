@@ -51,8 +51,12 @@ pub fn parse_suggestions(raw: &str) -> Vec<Suggestion> {
         (Some(s), Some(e)) if s < e => (s, e),
         _ => return vec![],
     };
-    let Ok(value) = serde_json::from_str::<Value>(&raw[start..=end]) else { return vec![] };
-    let Some(items) = value["actions"].as_array() else { return vec![] };
+    let Ok(value) = serde_json::from_str::<Value>(&raw[start..=end]) else {
+        return vec![];
+    };
+    let Some(items) = value["actions"].as_array() else {
+        return vec![];
+    };
     items
         .iter()
         .filter_map(|item| {
@@ -75,7 +79,14 @@ pub fn parse_suggestions(raw: &str) -> Vec<Suggestion> {
                 }
                 "habit" => {
                     let f = item["frequency"].as_str().unwrap_or("daily");
-                    s.frequency = Some(if Frequency::parse(f).is_some() { f } else { "daily" }.into());
+                    s.frequency = Some(
+                        if Frequency::parse(f).is_some() {
+                            f
+                        } else {
+                            "daily"
+                        }
+                        .into(),
+                    );
                 }
                 _ => return None,
             }
@@ -127,7 +138,15 @@ mod tests {
 
     #[test]
     fn tolerates_garbage() {
-        for raw in ["", "không có json", "{", "} {", "{\"actions\":5}", "[1,2]", "{\"actions\":[null,1,\"x\"]}"] {
+        for raw in [
+            "",
+            "không có json",
+            "{",
+            "} {",
+            "{\"actions\":5}",
+            "[1,2]",
+            "{\"actions\":[null,1,\"x\"]}",
+        ] {
             assert!(parse_suggestions(raw).is_empty(), "{raw}");
         }
         assert!(suggest_system("2026-10-28 09:00").contains("2026-10-28 09:00"));

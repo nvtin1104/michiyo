@@ -14,18 +14,18 @@ fn now_ms() -> i64 {
 
 fn tick(app: &tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<commands::Runtime>();
-    let fired = {
-        let _guard = state.history_lock.lock().map_err(|_| "lock")?;
-        let mut conn = commands::local_db(app)?;
+    let fired = commands::with_local_db(app, &state, "lock", |conn| {
         let offset: i64 = conn
-            .query_row("SELECT value FROM sync_state WHERE key = 'tz_offset'", [], |r| {
-                r.get::<_, String>(0)
-            })
+            .query_row(
+                "SELECT value FROM sync_state WHERE key = 'tz_offset'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
-        db::reminders::fire_due(&mut conn, now_ms(), offset).map_err(|e| e.to_string())?
-    };
+        db::reminders::fire_due(conn, now_ms(), offset).map_err(|e| e.to_string())
+    })?;
     if fired.is_empty() {
         return Ok(());
     }
@@ -33,7 +33,11 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
         let _ = app
             .notification()
             .builder()
-            .title(if item.kind == "todo" { "Việc cần làm" } else { "Sắp diễn ra" })
+            .title(if item.kind == "todo" {
+                "Việc cần làm"
+            } else {
+                "Sắp diễn ra"
+            })
             .body(&item.title)
             .show();
     }

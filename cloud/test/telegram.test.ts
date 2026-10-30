@@ -145,4 +145,56 @@ describe('Telegram webhook intake', () => {
     expect(ack).toHaveBeenCalledOnce(); expect(retry).not.toHaveBeenCalled();
     expect((await env.DB.prepare('SELECT status FROM telegram_webhook_inbox WHERE update_id = 55').first<{ status: string }>())?.status).toBe('failed');
   });
+
+  it('manages bot config from admin and supports workspace commands (/note, /notes)', async () => {
+    env.DEV_ADMIN_TOKEN = 'admin';
+    env.ENVIRONMENT = 'development';
+    env.TELEGRAM_BOT_TOKEN = 'test-token';
+    const auth = { Authorization: 'Bearer admin', 'Content-Type': 'application/json' };
+    const putRes = await app.request('/v1/admin/telegram/config', {
+      method: 'PUT',
+      headers: auth,
+      body: JSON.stringify({
+        enabled: true,
+        allowed_chat_ids: ['777'],
+        system_prompt: 'Trợ lý tùy chỉnh',
+        model: '@cf/meta/llama-3.1-8b-instruct',
+        hourly_limit: 15,
+        allow_workspace_queries: true,
+      }),
+    }, env);
+    expect(putRes.status).toBe(200);
+    const getRes = await app.request('/v1/admin/telegram/config', { headers: auth }, env);
+    const getBody = await getRes.json() as { config: { allowed_chat_ids: string[]; hourly_limit: number } };
+    expect(getBody.config.allowed_chat_ids).toEqual(['777']);
+    expect(getBody.config.hourly_limit).toBe(15);
+
+    const sentTexts: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      sentTexts.push(JSON.parse(String(init.body)).text);
+      return Response.json({ ok: true });
+    }));
+    const ack = vi.fn(), retry = vi.fn();
+    const createMsg = {
+      body: {
+        updateId: 80,
+        payload: JSON.stringify({ update_id: 80, message: { text: '/note Ý tưởng mới từ Telegram\nChi tiết nội dung', chat: { id: 777, type: 'private' } } }),
+        receivedAt: Date.now(),
+      },
+      ack,
+      retry,
+    };
+    const listMsg = {
+      body: {
+        updateId: 81,
+        payload: JSON.stringify({ update_id: 81, message: { text: '/notes Ý tưởng', chat: { id: 777, type: 'private' } } }),
+        receivedAt: Date.now(),
+      },
+      ack,
+      retry,
+    };
+    await worker.queue({ messages: [createMsg, listMsg] } as unknown as MessageBatch<typeof createMsg.body>, env);
+    expect(sentTexts[0]).toContain('Đã lưu ghi chú "Ý tưởng mới từ Telegram"');
+    expect(sentTexts[1]).toContain('Ý tưởng mới từ Telegram');
+  });
 });

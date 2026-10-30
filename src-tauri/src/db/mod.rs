@@ -1,9 +1,9 @@
 pub mod activity;
 pub mod events;
 pub mod habits;
+pub mod notes;
 pub mod reminders;
 pub mod sync;
-pub mod notes;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use std::{

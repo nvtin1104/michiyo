@@ -187,7 +187,12 @@ mod tests {
             .spawn()
             .unwrap();
         let tree = ProcessTree::attach(worker.id().unwrap()).unwrap();
-        assert!(tokio::time::timeout(Duration::from_millis(300), worker.wait()).await.is_err(), "worker exited before the job was closed");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), worker.wait())
+                .await
+                .is_err(),
+            "worker exited before the job was closed"
+        );
         drop(tree);
         tokio::time::timeout(Duration::from_secs(3), worker.wait())
             .await

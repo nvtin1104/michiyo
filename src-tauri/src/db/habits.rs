@@ -47,7 +47,20 @@ pub fn day_number(date: &str) -> Option<i64> {
         return None;
     }
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     if day > month_days[(month - 1) as usize] {
         return None;
     }
@@ -204,7 +217,13 @@ fn write_habit(tx: &Transaction<'_>, habit: &Habit) -> DbResult<()> {
         "INSERT INTO habits (id, updated_at, deleted_at, device_id, rev, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at, deleted_at=excluded.deleted_at, device_id=excluded.device_id, rev=excluded.rev, data=excluded.data",
         params![habit.id, habit.updated_at, habit.deleted_at, habit.device_id, habit.rev, data.to_string()],
     )?;
-    push_outbox(tx, "habit", &habit.id, habit.rev, &serde_json::to_string(habit)?)
+    push_outbox(
+        tx,
+        "habit",
+        &habit.id,
+        habit.rev,
+        &serde_json::to_string(habit)?,
+    )
 }
 
 pub fn list(db: &Connection, today: &str) -> DbResult<Vec<HabitView>> {
@@ -293,7 +312,11 @@ pub fn delete(db: &mut Connection, id: &str, rev: i64) -> DbResult<()> {
     let mut stmt = tx.prepare("SELECT id, rev, data FROM habit_logs WHERE deleted_at IS NULL AND json_extract(data, '$.habit_id') = ?1")?;
     let logs = stmt
         .query_map([id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(stmt);
@@ -365,7 +388,11 @@ pub fn check_in(db: &mut Connection, habit_id: &str, date: &str, done: bool) -> 
     }
     record_activity(
         &tx,
-        if done { "habit_checkin" } else { "habit_uncheck" },
+        if done {
+            "habit_checkin"
+        } else {
+            "habit_uncheck"
+        },
         habit.updated_at,
         &habit.device_id,
         serde_json::json!({"habit_id": habit.id, "title": habit.title, "date": date}),
@@ -402,7 +429,15 @@ mod tests {
             Some(Frequency::Weekdays(vec![1, 5]))
         );
         assert_eq!(Frequency::parse("weekly:3"), Some(Frequency::Weekly(3)));
-        for bad in ["", "weekly:0", "weekly:8", "weekdays:", "weekdays:7", "weekdays:1,1", "hourly"] {
+        for bad in [
+            "",
+            "weekly:0",
+            "weekly:8",
+            "weekdays:",
+            "weekdays:7",
+            "weekdays:1,1",
+            "hourly",
+        ] {
             assert!(Frequency::parse(bad).is_none(), "{bad}");
         }
     }
@@ -412,7 +447,10 @@ mod tests {
         let today = d("2026-10-28");
         let done = [d("2026-10-25"), d("2026-10-26"), d("2026-10-27")];
         assert_eq!(streak(&Frequency::Daily, &done, today), 3);
-        assert_eq!(streak(&Frequency::Daily, &[today - 2, today - 1, today], today), 3);
+        assert_eq!(
+            streak(&Frequency::Daily, &[today - 2, today - 1, today], today),
+            3
+        );
         assert_eq!(streak(&Frequency::Daily, &[today - 3, today - 1], today), 1);
         assert_eq!(streak(&Frequency::Daily, &[today - 3], today), 0);
         assert_eq!(streak(&Frequency::Daily, &[], today), 0);
@@ -425,9 +463,15 @@ mod tests {
         let done = [d("2026-10-23"), d("2026-10-26"), d("2026-10-28")];
         assert_eq!(streak(&f, &done, d("2026-10-28")), 3);
         // Missing Monday breaks it even though Tue/Thu/Sat are free.
-        assert_eq!(streak(&f, &[d("2026-10-23"), d("2026-10-28")], d("2026-10-28")), 1);
+        assert_eq!(
+            streak(&f, &[d("2026-10-23"), d("2026-10-28")], d("2026-10-28")),
+            1
+        );
         // Checking in on an unscheduled day neither helps nor hurts.
-        assert_eq!(streak(&f, &[d("2026-10-26"), d("2026-10-27")], d("2026-10-27")), 1);
+        assert_eq!(
+            streak(&f, &[d("2026-10-26"), d("2026-10-27")], d("2026-10-27")),
+            1
+        );
     }
 
     #[test]
@@ -453,16 +497,31 @@ mod tests {
         super::super::migrate(&mut db)?;
         assert!(save(
             &mut db,
-            HabitInput { id: None, rev: None, title: " ".into(), frequency: "daily".into() }
+            HabitInput {
+                id: None,
+                rev: None,
+                title: " ".into(),
+                frequency: "daily".into()
+            }
         )
         .is_err());
         let habit = save(
             &mut db,
-            HabitInput { id: None, rev: None, title: "Đọc sách".into(), frequency: "daily".into() },
+            HabitInput {
+                id: None,
+                rev: None,
+                title: "Đọc sách".into(),
+                frequency: "daily".into(),
+            },
         )?;
         let stale = save(
             &mut db,
-            HabitInput { id: Some(habit.id.clone()), rev: Some(0), title: "x".into(), frequency: "daily".into() },
+            HabitInput {
+                id: Some(habit.id.clone()),
+                rev: Some(0),
+                title: "x".into(),
+                frequency: "daily".into(),
+            },
         );
         assert!(stale.is_err());
 

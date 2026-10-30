@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GET, POST, DELETE } from './[...path]/+server';
+import { GET, POST, PUT, DELETE } from './[...path]/+server';
 
 function context(method: string, path: string, options: { origin?: string; jwt?: string; service?: boolean } = {}) {
   const fetch = vi.fn(async (request: Request) => Response.json({ url: request.url, jwt: request.headers.get('Cf-Access-Jwt-Assertion') }));
@@ -19,6 +19,10 @@ describe('admin service bridge', () => {
     const response = await GET(good.event);
     expect(await response.json()).toEqual({ url: 'https://michiyo.internal/v1/admin/devices', jwt: 'assertion' });
     expect(response.headers.get('cache-control')).toBe('no-store');
+    const tgGet = context('GET', 'admin/telegram/config', { service: true, jwt: 'assertion' });
+    expect((await GET(tgGet.event)).status).toBe(200);
+    const tgPut = context('PUT', 'admin/telegram/config', { service: true, jwt: 'assertion', origin: 'https://admin.example' });
+    expect((await PUT(tgPut.event)).status).toBe(200);
     const bad = context('GET', 'ai/chat', { service: true, jwt: 'assertion' });
     expect((await GET(bad.event)).status).toBe(404);
   });

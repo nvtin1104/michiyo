@@ -293,3 +293,19 @@ Ngày: 2026-10-28 · Prompt thực thi: `docs/PLATFORM_PROMPT.md`
 
 - Build desktop và admin, admin check, Cloud typecheck, Wrangler dry-run, 51 test JavaScript và 49 test Rust Windows đạt. Các kiểm tra giao diện với IPC/API giả lập đạt khi chạy lại: companion 3D timeout ở lượt đầu trong lúc Vite tối ưu dependency và reload, sau đó đạt khi chạy riêng với server ổn định; 12 script còn lại đạt ở lượt đầu.
 - Kết quả này không thay thế chạy desktop thật, Cloudflare/Meta thật, hoặc triển khai các phần plan chưa có.
+
+
+### Tái cấu trúc 3 tầng (Windows Offline/Data Server · Web Admin + Telegram Bot · Mobile-ready) — 2026-10-30
+
+- **Shared & Mobile-ready (`shared/`, `src/lib/workspace-api.ts`):**
+  - Mở rộng `@michiyo/shared` với schema `TelegramBotConfig`, `TelegramInboxItem` và `CloudClient` (HTTP/Sync client đa nền tảng cho Data Server).
+  - Thêm `WorkspaceAdapter` (`src/lib/workspace-api.ts`) tách giao diện không gian làm việc khỏi Tauri IPC trực tiếp; tách `Home.svelte`, `ReminderBar.svelte` khỏi `Shell.svelte`, gỡ tab `bot` dư thừa trên desktop và chuyển `createWanderController` sang `src/mascot/motion.ts`. Khôi phục nhánh render `Translate.svelte` cho popup `?view=translate`.
+- **Backend App Windows (`src-tauri/`):**
+  - Tách `src-tauri/src/commands/mod.rs` (~1.400 dòng) thành `commands::workspace`, `commands::ai`, `commands::desktop`, `commands::motion`, `commands::skins`.
+  - Tái sử dụng kết nối SQLite persistent trong `Runtime.db` cho mọi command, scheduler nhắc nhở và vòng lặp đồng bộ.
+  - Tối ưu vòng lặp hit-mask 60ms (chỉ emit khi tọa độ chuột hoặc trạng thái hit thay đổi) và clipboard watcher 900ms (đọc cờ atomic `clipboard_watch` trong RAM thay vì đọc lại `settings.json`).
+- **Data Server (`cloud/`) & Web Admin (`admin/`) tích hợp Telegram Bot:**
+  - Thêm bảng `telegram_config` trong `cloud/migrations/0001_baseline.sql` và các route `GET/PUT /v1/admin/telegram/config`.
+  - Hỗ trợ cấu hình động Telegram Bot từ Web Admin (bật/tắt, danh sách `allowed_chat_ids`, `model`, `system_prompt`, `hourly_limit`, `allow_workspace_queries`) với fallback về biến môi trường.
+  - Hỗ trợ các lệnh truy vấn/ghi dữ liệu trực tiếp với Data Server trên Telegram: `/today`, `/habits`, `/notes [từ khóa]`, `/note <nội dung>` (lưu vào `sync_records` và tự động đồng bộ về Windows/Mobile).
+- **Kiểm tra:** `npm run build`, `npm test` (71/71 test đạt), `npm run typecheck --workspace @michiyo/cloud`, `npm run check --workspace @michiyo/admin`, `npm run build --workspace @michiyo/admin`, `cargo fmt --check` và `cargo test --manifest-path src-tauri/Cargo.toml --locked` (50/50 test Rust đạt).

@@ -9,11 +9,20 @@ const NOT_CONNECTED: &str = "Chưa kết nối cloud. Model Cloudflare cần bac
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Backend {
-    Claude { model: String },
+    Claude {
+        model: String,
+    },
     /// Any server that speaks `POST {base}/chat/completions` (OpenAI, OpenRouter, Ollama, LM Studio…).
-    OpenAi { base: String, model: String, use_key: bool },
+    OpenAi {
+        base: String,
+        model: String,
+        use_key: bool,
+    },
     /// Michiyo Cloud Worker: OpenAI-compatible at `{base}/chat/completions`, authenticated by the device token.
-    Cloudflare { base: String, model: String },
+    Cloudflare {
+        base: String,
+        model: String,
+    },
 }
 
 impl Backend {
@@ -23,7 +32,11 @@ impl Backend {
 }
 
 fn text<'a>(config: &'a Value, key: &str, default: &'a str) -> &'a str {
-    config[key].as_str().map(str::trim).filter(|v| !v.is_empty()).unwrap_or(default)
+    config[key]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(default)
 }
 
 pub fn mode(config: &Value) -> &str {
@@ -54,7 +67,9 @@ pub fn validate_base(url: &str) -> Result<(), String> {
 /// Backends to try in order. Offline never leaves the machine; Hybrid falls back to the local model.
 pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
     let local = (!text(config, "localModel", "").is_empty()).then(|| Backend::OpenAi {
-        base: text(config, "localBase", DEFAULT_LOCAL_BASE).trim_end_matches('/').into(),
+        base: text(config, "localBase", DEFAULT_LOCAL_BASE)
+            .trim_end_matches('/')
+            .into(),
         model: text(config, "localModel", "").into(),
         use_key: false,
     });
@@ -63,15 +78,22 @@ pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
         if url.is_empty() {
             return Err(NOT_CONNECTED.into());
         }
-        Backend::Cloudflare { base: format!("{url}/v1/ai"), model: text(config, "cloudModel", "").into() }
+        Backend::Cloudflare {
+            base: format!("{url}/v1/ai"),
+            model: text(config, "cloudModel", "").into(),
+        }
     } else if config["chatProvider"].as_str() == Some("openai_compat") {
         Backend::OpenAi {
-            base: text(config, "openaiBase", "https://api.openai.com/v1").trim_end_matches('/').into(),
+            base: text(config, "openaiBase", "https://api.openai.com/v1")
+                .trim_end_matches('/')
+                .into(),
             model: text(config, "openaiModel", "").into(),
             use_key: true,
         }
     } else {
-        Backend::Claude { model: text(config, "model", "claude-haiku-5-5").into() }
+        Backend::Claude {
+            model: text(config, "model", "claude-haiku-5-5").into(),
+        }
     };
     let backends = match mode(config) {
         "offline" => vec![if primary.is_local() {
@@ -100,7 +122,8 @@ pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
 /// Offline keeps translation on this machine: only a LibreTranslate server on localhost qualifies.
 pub fn translator_allowed(config: &Value, engine: &str) -> bool {
     mode(config) != "offline"
-        || (engine == "libre" && is_local_url(text(config, "libreUrl", "https://libretranslate.com")))
+        || (engine == "libre"
+            && is_local_url(text(config, "libreUrl", "https://libretranslate.com")))
 }
 
 #[derive(Debug, PartialEq)]
@@ -122,7 +145,9 @@ impl SseDecoder {
         while let Some(end) = self.buffer.iter().position(|b| *b == b'\n') {
             let line: Vec<u8> = self.buffer.drain(..=end).collect();
             let line = String::from_utf8_lossy(&line);
-            let Some(payload) = line.trim().strip_prefix("data:") else { continue };
+            let Some(payload) = line.trim().strip_prefix("data:") else {
+                continue;
+            };
             let payload = payload.trim();
             if payload == "[DONE]" {
                 events.push(Sse::Done);
@@ -170,9 +195,12 @@ pub async fn stream_chat(
     validate_base(base)?;
     let mut all = vec![json!({"role": "system", "content": system})];
     all.extend(messages.as_array().cloned().unwrap_or_default());
-    let request = authorized(client.post(format!("{}/chat/completions", base.trim_end_matches('/'))), key)
-        .timeout(std::time::Duration::from_secs(600))
-        .json(&json!({"model": model, "messages": all, "stream": true, "max_tokens": max_tokens}));
+    let request = authorized(
+        client.post(format!("{}/chat/completions", base.trim_end_matches('/'))),
+        key,
+    )
+    .timeout(std::time::Duration::from_secs(600))
+    .json(&json!({"model": model, "messages": all, "stream": true, "max_tokens": max_tokens}));
     let mut response = tokio::select! {
         _ = cancel.notified() => return Ok(()),
         sent = request.send() => sent.map_err(|_| "Không kết nối được model. Hãy kiểm tra địa chỉ và dịch vụ đang chạy.".to_string())?,
@@ -197,20 +225,37 @@ pub async fn stream_chat(
 }
 
 /// Model ids offered by an OpenAI-compatible server (`GET {base}/models`).
-pub async fn list_models(client: &reqwest::Client, base: &str, key: Option<&str>) -> Result<Vec<String>, String> {
+pub async fn list_models(
+    client: &reqwest::Client,
+    base: &str,
+    key: Option<&str>,
+) -> Result<Vec<String>, String> {
     validate_base(base)?;
-    let response = authorized(client.get(format!("{}/models", base.trim_end_matches('/'))), key)
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|_| "Không kết nối được model. Hãy kiểm tra địa chỉ và dịch vụ đang chạy.".to_string())?;
+    let response = authorized(
+        client.get(format!("{}/models", base.trim_end_matches('/'))),
+        key,
+    )
+    .timeout(std::time::Duration::from_secs(15))
+    .send()
+    .await
+    .map_err(|_| {
+        "Không kết nối được model. Hãy kiểm tra địa chỉ và dịch vụ đang chạy.".to_string()
+    })?;
     if !response.status().is_success() {
         return Err(http_error(response.status()));
     }
-    let body: Value = response.json().await.map_err(|_| "Phản hồi danh sách model không hợp lệ".to_string())?;
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| "Phản hồi danh sách model không hợp lệ".to_string())?;
     let mut ids: Vec<String> = body["data"]
         .as_array()
-        .map(|items| items.iter().filter_map(|m| m["id"].as_str().map(str::to_owned)).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|m| m["id"].as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
     ids.sort();
     ids.dedup();
@@ -221,17 +266,29 @@ pub async fn list_models(client: &reqwest::Client, base: &str, key: Option<&str>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::{matchers::{header, method, path}, Mock, MockServer, ResponseTemplate};
+    use wiremock::{
+        matchers::{header, method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
 
     #[test]
     fn modes_choose_and_restrict_backends() {
         let remote = json!({"model": "claude-haiku-5-5"});
-        assert_eq!(plan(&remote).unwrap(), vec![Backend::Claude { model: "claude-haiku-5-5".into() }]);
+        assert_eq!(
+            plan(&remote).unwrap(),
+            vec![Backend::Claude {
+                model: "claude-haiku-5-5".into()
+            }]
+        );
 
         let mut offline = json!({"mode": "offline", "localModel": "llama3"});
         assert_eq!(
             plan(&offline).unwrap(),
-            vec![Backend::OpenAi { base: DEFAULT_LOCAL_BASE.into(), model: "llama3".into(), use_key: false }]
+            vec![Backend::OpenAi {
+                base: DEFAULT_LOCAL_BASE.into(),
+                model: "llama3".into(),
+                use_key: false
+            }]
         );
         offline["localModel"] = json!("");
         assert!(plan(&offline).unwrap_err().contains("Offline"));
@@ -246,26 +303,42 @@ mod tests {
         assert_eq!(plan.len(), 2);
         assert!(matches!(plan[0], Backend::Claude { .. }) && plan[1].is_local());
         assert_eq!(super::plan(&json!({"mode": "hybrid"})).unwrap().len(), 1);
-        assert!(super::plan(&json!({"modelSource": "cloudflare"})).unwrap_err().contains("cloud"));
+        assert!(super::plan(&json!({"modelSource": "cloudflare"}))
+            .unwrap_err()
+            .contains("cloud"));
         let cloud = json!({"modelSource": "cloudflare", "cloudUrl": "https://michiyo.example.workers.dev/", "cloudModel": "@cf/m"});
         assert_eq!(
             super::plan(&cloud).unwrap(),
-            vec![Backend::Cloudflare { base: "https://michiyo.example.workers.dev/v1/ai".into(), model: "@cf/m".into() }]
+            vec![Backend::Cloudflare {
+                base: "https://michiyo.example.workers.dev/v1/ai".into(),
+                model: "@cf/m".into()
+            }]
         );
         // Offline only accepts a Worker running on this machine (e.g. `wrangler dev`).
         let offline_cloud = |url: &str| json!({"mode": "offline", "modelSource": "cloudflare", "cloudUrl": url, "localModel": "llama3"});
-        assert!(matches!(super::plan(&offline_cloud("http://127.0.0.1:8787")).unwrap()[0], Backend::Cloudflare { .. }));
-        assert!(matches!(super::plan(&offline_cloud("https://x.workers.dev")).unwrap()[0], Backend::OpenAi { .. }));
-        assert!(super::plan(&json!({"modelSource": "cloudflare", "cloudUrl": "http://x.workers.dev"})).is_err());
+        assert!(matches!(
+            super::plan(&offline_cloud("http://127.0.0.1:8787")).unwrap()[0],
+            Backend::Cloudflare { .. }
+        ));
+        assert!(matches!(
+            super::plan(&offline_cloud("https://x.workers.dev")).unwrap()[0],
+            Backend::OpenAi { .. }
+        ));
+        assert!(super::plan(
+            &json!({"modelSource": "cloudflare", "cloudUrl": "http://x.workers.dev"})
+        )
+        .is_err());
     }
 
     #[test]
     fn rejects_unsafe_or_incomplete_endpoints() {
         for base in ["http://example.com/v1", "ftp://x", "not a url"] {
-            let c = json!({"chatProvider": "openai_compat", "openaiBase": base, "openaiModel": "m"});
+            let c =
+                json!({"chatProvider": "openai_compat", "openaiBase": base, "openaiModel": "m"});
             assert!(plan(&c).is_err(), "{base}");
         }
-        let no_model = json!({"chatProvider": "openai_compat", "openaiBase": "https://api.openai.com/v1"});
+        let no_model =
+            json!({"chatProvider": "openai_compat", "openaiBase": "https://api.openai.com/v1"});
         assert!(plan(&no_model).unwrap_err().contains("model"));
         assert!(is_local_url("http://localhost:11434/v1") && is_local_url("http://[::1]:8080"));
         assert!(!is_local_url("http://localhost.evil.com/v1"));
@@ -293,7 +366,11 @@ mod tests {
             events.extend(decoder.feed(&bytes[split..]));
             assert_eq!(
                 events,
-                vec![Sse::Delta("Xin ".into()), Sse::Delta("chào ✦".into()), Sse::Done],
+                vec![
+                    Sse::Delta("Xin ".into()),
+                    Sse::Delta("chào ✦".into()),
+                    Sse::Done
+                ],
                 "split at {split}"
             );
         }
@@ -302,7 +379,12 @@ mod tests {
     fn sse(parts: &[&str]) -> String {
         parts
             .iter()
-            .map(|p| format!("data: {}\n\n", json!({"choices": [{"delta": {"content": p}}]})))
+            .map(|p| {
+                format!(
+                    "data: {}\n\n",
+                    json!({"choices": [{"delta": {"content": p}}]})
+                )
+            })
             .collect::<String>()
             + "data: [DONE]\n\n"
     }
@@ -313,17 +395,34 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .and(header("authorization", "Bearer sk-test"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(sse(&["Xin ", "chào"]), "text/event-stream"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(sse(&["Xin ", "chào"]), "text/event-stream"),
+            )
             .mount(&server)
             .await;
         let base = format!("{}/v1", server.uri());
         let mut got = String::new();
-        stream_chat(&reqwest::Client::new(), &base, Some("sk-test"), "m", "Bạn là Michiyo", &json!([{"role": "user", "content": "hi"}]), 64, Arc::new(Notify::new()), |t| got.push_str(t))
-            .await
-            .unwrap();
+        stream_chat(
+            &reqwest::Client::new(),
+            &base,
+            Some("sk-test"),
+            "m",
+            "Bạn là Michiyo",
+            &json!([{"role": "user", "content": "hi"}]),
+            64,
+            Arc::new(Notify::new()),
+            |t| got.push_str(t),
+        )
+        .await
+        .unwrap();
         assert_eq!(got, "Xin chào");
-        let body: Value = serde_json::from_slice(&server.received_requests().await.unwrap()[0].body).unwrap();
-        assert_eq!(body["messages"][0], json!({"role": "system", "content": "Bạn là Michiyo"}));
+        let body: Value =
+            serde_json::from_slice(&server.received_requests().await.unwrap()[0].body).unwrap();
+        assert_eq!(
+            body["messages"][0],
+            json!({"role": "system", "content": "Bạn là Michiyo"})
+        );
         assert_eq!(body["messages"][1]["content"], "hi");
         assert_eq!(body["stream"], true);
         assert_eq!(body["max_tokens"], 64);
@@ -332,20 +431,49 @@ mod tests {
     #[tokio::test]
     async fn maps_http_errors_without_leaking_the_key() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(401).set_body_string("bad key sk-secret")).mount(&server).await;
-        let error = stream_chat(&reqwest::Client::new(), &server.uri(), Some("sk-secret"), "m", "", &json!([]), 8, Arc::new(Notify::new()), |_| {})
-            .await
-            .unwrap_err();
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("bad key sk-secret"))
+            .mount(&server)
+            .await;
+        let error = stream_chat(
+            &reqwest::Client::new(),
+            &server.uri(),
+            Some("sk-secret"),
+            "m",
+            "",
+            &json!([]),
+            8,
+            Arc::new(Notify::new()),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
         assert!(error.contains("từ chối khóa") && !error.contains("sk-secret"));
         // Plain HTTP to a non-local host is refused before any request is made.
-        assert!(stream_chat(&reqwest::Client::new(), "http://example.com/v1", None, "m", "", &json!([]), 8, Arc::new(Notify::new()), |_| {}).await.is_err());
+        assert!(stream_chat(
+            &reqwest::Client::new(),
+            "http://example.com/v1",
+            None,
+            "m",
+            "",
+            &json!([]),
+            8,
+            Arc::new(Notify::new()),
+            |_| {}
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
     async fn cancellation_stops_a_slow_response() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(5)).set_body_raw(sse(&["late"]), "text/event-stream"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_secs(5))
+                    .set_body_raw(sse(&["late"]), "text/event-stream"),
+            )
             .mount(&server)
             .await;
         let cancel = Arc::new(Notify::new());
@@ -356,7 +484,19 @@ mod tests {
         });
         let mut got = String::new();
         let started = std::time::Instant::now();
-        stream_chat(&reqwest::Client::new(), &server.uri(), None, "m", "", &json!([]), 8, cancel, |t| got.push_str(t)).await.unwrap();
+        stream_chat(
+            &reqwest::Client::new(),
+            &server.uri(),
+            None,
+            "m",
+            "",
+            &json!([]),
+            8,
+            cancel,
+            |t| got.push_str(t),
+        )
+        .await
+        .unwrap();
         assert!(got.is_empty() && started.elapsed() < std::time::Duration::from_secs(3));
     }
 
@@ -365,10 +505,19 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/v1/models"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [{"id": "b"}, {"id": "a"}, {"id": "b"}]})))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"data": [{"id": "b"}, {"id": "a"}, {"id": "b"}]})),
+            )
             .mount(&server)
             .await;
-        let ids = list_models(&reqwest::Client::new(), &format!("{}/v1", server.uri()), None).await.unwrap();
+        let ids = list_models(
+            &reqwest::Client::new(),
+            &format!("{}/v1", server.uri()),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(ids, vec!["a", "b"]);
     }
 }

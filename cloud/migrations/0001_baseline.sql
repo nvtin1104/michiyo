@@ -86,3 +86,14 @@ CREATE TABLE telegram_webhook_inbox (
     updated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX telegram_inbox_status_updated ON telegram_webhook_inbox(status, updated_at);
+
+CREATE TABLE telegram_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    allowed_chat_ids TEXT NOT NULL DEFAULT '[]',
+    system_prompt TEXT NOT NULL DEFAULT 'Bạn là Michiyo, trợ lý thân thiện và ngắn gọn.',
+    model TEXT NOT NULL DEFAULT '',
+    hourly_limit INTEGER NOT NULL DEFAULT 20,
+    allow_workspace_queries INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL DEFAULT 0
+);

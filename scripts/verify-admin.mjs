@@ -16,6 +16,25 @@ try {
       path.endsWith('/api-keys') ? { api_keys: [] } :
       path.endsWith('/provider-keys') ? { provider_keys: [] } :
       path.endsWith('/usage') ? { usage: [] } :
+      path.endsWith('/telegram/summary') ? { statuses: [{ status: 'sent', count: 3 }] } :
+      path.endsWith('/telegram/issues') ? { issues: [] } :
+      path.endsWith('/telegram/config') && req.method() === 'PUT' ? { config: req.postDataJSON() } :
+      path.endsWith('/telegram/config') ? {
+        config: {
+          enabled: true,
+          allowed_chat_ids: ['12345'],
+          system_prompt: 'Bạn là Michiyo, trợ lý thân thiện và ngắn gọn.',
+          model: '@cf/meta/llama-3.1-8b-instruct',
+          hourly_limit: 20,
+          allow_workspace_queries: true,
+        },
+        environment: {
+          token_configured: true,
+          webhook_secret_configured: true,
+          queue_configured: true,
+          allowed_models: ['@cf/meta/llama-3.1-8b-instruct'],
+        },
+      } :
       path.endsWith('/sync/records') ? { records: [{ id: 'note-1', title: 'Ghi chú thử' }], cursor: '1', more: false } :
       path.endsWith('/pair/start') ? { code: 'TEST2345', expires_at: Date.now() + 600000 } : { ok: true };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
@@ -46,8 +65,16 @@ try {
   const download = await downloaded;
   assert.equal(download.suggestedFilename(), 'michiyo-note.json');
   assert.deepEqual(JSON.parse(await readFile(await download.path(), 'utf8')), { type: 'note', records: [{ id: 'note-1', title: 'Ghi chú thử' }] });
+
+  // Test Telegram Bot configuration tab
+  await page.getByRole('button', { name: 'Telegram', exact: true }).click();
+  await page.getByLabel('Chat ID được phép (phân cách bằng dấu phẩy)').fill('12345, 67890');
+  await page.getByRole('button', { name: 'Lưu cấu hình Bot' }).click();
+  await page.getByText('Đã lưu cấu hình Telegram Bot.').waitFor();
+  assert.deepEqual(writes.at(-1).body.allowed_chat_ids, ['12345', '67890']);
+
   await page.setViewportSize({ width: 390, height: 800 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors, []);
-  console.log('PASS: admin pairing, one-time API key, provider key clearing and mobile layout (mock API).');
+  console.log('PASS: admin pairing, one-time API key, provider key clearing, Telegram bot config and mobile layout (mock API).');
 } finally { await browser.close(); }
