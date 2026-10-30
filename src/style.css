@@ -10,6 +10,12 @@
 }
 body {
   margin: 0;
+  background: transparent;
+}
+html[data-view='main'],
+html[data-view='main'] body,
+html[data-view='main'] #app {
+  background: transparent;
 }
 html[data-view='mascot'],
 html[data-view='mascot'] body,
@@ -360,7 +366,7 @@ h1 {
   font-size: 27px;
   font-weight: 650;
   margin: 6px 0 0;
-  letter-spacing: -.035em;
+  letter-spacing: -0.035em;
 }
 h1 span {
   color: #c59753;
@@ -716,42 +722,43 @@ body:has(.preview) {
 }
 .settings-shell .settings-header {
   flex: none;
-  min-height: 64px;
-  padding: 12px 24px;
+  min-height: 0;
+  padding: 2px 8px 6px;
   margin: 0;
-  border-bottom: 1px solid #e2e5dd;
-  gap: 12px;
+  border-bottom: 0;
+  gap: 6px;
 }
 .settings-shell .settings-header h1 {
   font-family: 'Segoe UI', sans-serif !important;
-  font-size: 18px !important;
-  font-weight: 600;
-  letter-spacing: 0;
+  font-size: 11px !important;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7b6e;
   margin: 0;
 }
 .settings-header > span {
-  font-size: 12px;
-  color: #718076;
+  display: none;
 }
 .settings-shell .settings-layout {
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-columns: 144px minmax(0, 1fr);
   gap: 0;
   flex: 1;
   min-height: 0;
 }
 .settings-shell nav {
-  padding: 16px 10px;
+  padding: 10px 8px;
   border-right: 1px solid #e2e5dd;
   background: #f1f4ef;
   overflow-y: auto;
 }
 .settings-shell nav button {
-  min-height: 38px;
-  margin: 0 0 4px;
-  padding: 0 12px;
-  font-size: 13px;
-  border-radius: 8px;
+  min-height: 32px;
+  margin: 0 0 2px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  border-radius: 7px;
   gap: 0;
   align-items: center;
 }
@@ -762,7 +769,7 @@ body:has(.preview) {
   box-shadow: 0 1px 4px #263b2b12;
 }
 .settings-shell .settings-content {
-  padding: 24px 28px;
+  padding: 12px 18px;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #c8cec2 transparent;
@@ -770,26 +777,26 @@ body:has(.preview) {
   min-width: 0;
 }
 .settings-shell h2 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  margin: 0 0 14px;
+  margin: 0 0 10px;
 }
 .settings-shell label {
-  font-size: 12px;
-  gap: 6px;
-  margin: 0 0 12px;
+  font-size: 11.5px;
+  gap: 4px;
+  margin: 0 0 8px;
   color: #555f53;
 }
 .settings-shell input:not([type='checkbox']):not([type='range']),
 .settings-shell textarea {
-  padding: 8px 10px;
+  padding: 6px 9px;
   border: 1px solid #d9ded3;
   border-radius: 5px;
   background: #fff;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
   width: 100%;
-  min-height: 34px;
+  min-height: 30px;
   box-shadow: none;
 }
 .settings-shell textarea {
@@ -887,10 +894,10 @@ body:has(.preview) {
 .settings-shell footer {
   flex: none;
   margin: 0;
-  padding: 9px 16px;
+  padding: 6px 14px;
   border-top: 1px solid #e2e5dd;
-  gap: 12px;
-  min-height: 48px;
+  gap: 10px;
+  min-height: 38px;
   background: #fafaf7;
   font-size: 11px;
 }
@@ -978,8 +985,15 @@ body:has(.preview) {
   font-weight: 600;
 }
 @media (max-width: 520px) {
-  .settings-shell .settings-header { padding: 10px 16px; min-height: 52px; }
-  .settings-header > span { display: none; }
+  .settings-shell .settings-header {
+    padding: 0 6px 0 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+  }
+  .settings-header > span {
+    display: none;
+  }
   .settings-shell .settings-layout {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
@@ -987,13 +1001,19 @@ body:has(.preview) {
   .settings-shell nav {
     display: flex;
     flex-direction: row;
+    align-items: center;
     gap: 4px;
     overflow-x: auto;
-    padding: 8px 12px;
+    padding: 6px 10px;
     border-right: 0;
     border-bottom: 1px solid #e2e5dd;
   }
-  .settings-shell nav button { flex: none; width: auto; margin: 0; white-space: nowrap; }
+  .settings-shell nav button {
+    flex: none;
+    width: auto;
+    margin: 0;
+    white-space: nowrap;
+  }
   .settings-shell .settings-content {
     padding: 14px 12px;
   }

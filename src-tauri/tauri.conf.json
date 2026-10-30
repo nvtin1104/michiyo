@@ -5,7 +5,7 @@
   "identifier": "app.michiyo.desktop",
   "build": {
     "beforeDevCommand": "npm run build:agent && npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -23,7 +23,8 @@
         "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "resizable": false
+        "resizable": false,
+        "visible": false
       }
     ],
     "security": {

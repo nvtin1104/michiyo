@@ -79,10 +79,17 @@ pub(crate) fn open_main_impl(app: tauri::AppHandle, route: String) -> Result<(),
     {
         return Err("Trang không hợp lệ".into());
     }
+    let was_visible = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
     let window = if let Some(window) = app.get_webview_window("main") {
         window
             .emit("shell-navigate", &route)
             .map_err(|e| e.to_string())?;
+        if !was_visible {
+            let _ = window.emit("shell-opened", &route);
+        }
         window
     } else {
         tauri::WebviewWindowBuilder::new(
@@ -93,14 +100,57 @@ pub(crate) fn open_main_impl(app: tauri::AppHandle, route: String) -> Result<(),
         .title("Michiyo")
         .inner_size(1040., 720.)
         .min_inner_size(640., 480.)
+        .center()
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
         .visible(false)
         .build()
         .map_err(|e| e.to_string())?
     };
+    if let Some(mascot) = app.get_webview_window("mascot") {
+        let _ = mascot.hide();
+        let _ = app.emit_to("mascot", "mascot-visible", false);
+    }
+    if let Some(chat) = app.get_webview_window("chat") {
+        let _ = chat.hide();
+    }
+    let _ = window.unminimize();
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    let _ = app.emit_to("main", "focus-composer", ());
     notify_chat_visibility(&app);
     Ok(())
+}
+
+pub(crate) fn close_main_to_mascot_impl(app: &tauri::AppHandle) -> Result<(), String> {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.hide();
+    }
+    if let Some(chat) = app.get_webview_window("chat") {
+        let _ = chat.hide();
+    }
+    let _ = ensure_mascot_on_screen(app);
+    if let Some(mascot) = app.get_webview_window("mascot") {
+        mascot.show().map_err(|e| e.to_string())?;
+        let _ = app.emit_to("mascot", "mascot-visible", true);
+        let _ = app.emit_to("mascot", "mascot-boom", ());
+    }
+    notify_chat_visibility(app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn window_minimize(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(main) = app.get_webview_window("main") {
+        main.minimize().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn window_close_to_mascot(app: tauri::AppHandle) -> Result<(), String> {
+    close_main_to_mascot_impl(&app)
 }
 
 pub(crate) fn notify_chat_visibility(app: &tauri::AppHandle) {
@@ -339,6 +389,9 @@ pub(crate) fn position_panel(
 pub async fn open_panel(app: tauri::AppHandle, label: String) -> Result<(), String> {
     if !["chat", "settings", "translate"].contains(&label.as_str()) {
         return Err("Cửa sổ không hợp lệ".into());
+    }
+    if label == "chat" {
+        return open_main_impl(app, "chat".into());
     }
     show_panel(&app, &label, false)
 }

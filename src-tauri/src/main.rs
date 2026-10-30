@@ -12,11 +12,10 @@ use tauri_plugin_store::StoreExt;
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            let _ = commands::ensure_mascot_on_screen(app);
-            if let Some(w) = app.get_webview_window("mascot") {
-                let _ = w.show();
-                let _ = app.emit_to("mascot", "mascot-visible", true);
-            }
+            let h = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = commands::open_main(h, "chat".into()).await;
+            });
         }))
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -53,6 +52,10 @@ fn main() {
             commands::stop_chat,
             commands::test_connection,
             commands::ai_models,
+            commands::local_status,
+            commands::local_pull_model,
+            commands::local_cancel_pull,
+            commands::local_delete_model,
             commands::cloud_pair,
             sync::sync_status,
             sync::sync_now,
@@ -61,6 +64,8 @@ fn main() {
             commands::open_panel,
             commands::close_chat,
             commands::open_main,
+            commands::window_minimize,
+            commands::window_close_to_mascot,
             commands::open_translation_in_main,
             commands::open_chat_in_main,
             commands::take_shell_chat_draft,
@@ -105,6 +110,7 @@ fn main() {
                             } else {
                                 let _ = w.show();
                                 let _ = app.emit_to("mascot", "mascot-visible", true);
+                                let _ = app.emit_to("mascot", "mascot-boom", ());
                             }
                         }
                     }
@@ -146,6 +152,7 @@ fn main() {
                 if let Err(e) = commands::apply_config(setup_handle.clone()).await {
                     let _ = setup_handle.emit("config-error", e);
                 }
+                let _ = commands::open_main(setup_handle, "chat".into()).await;
             });
             // Poll only the tiny mascot hit mask; emit pointer/hit events only when values change.
             std::thread::spawn(move || {
@@ -262,8 +269,12 @@ fn main() {
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                if w.label() == "main" {
+                    let _ = commands::close_main_to_mascot_impl(w.app_handle());
+                    return;
+                }
                 let _ = w.hide();
-                if w.label() == "chat" || w.label() == "main" {
+                if w.label() == "chat" {
                     commands::notify_chat_visibility(w.app_handle());
                 }
                 if w.label() == "mascot" {

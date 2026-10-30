@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { locale, t } from '../lib/i18n';
-  import { desktop, type Config } from '../lib/api';
+  import { call, desktop, type Config } from '../lib/api';
   import {
     workspace,
     type DueReminder,
@@ -18,10 +19,41 @@
   import Calendar from '../calendar/Calendar.svelte';
   import Home from './Home.svelte';
   import ReminderBar from './ReminderBar.svelte';
+  import RezeIntro from './RezeIntro.svelte';
   import type { Note } from '@michiyo/shared';
 
   export let config: Config;
   export let save: () => Promise<void>;
+
+  let intro: RezeIntro | undefined;
+  let introStaging = false;
+
+  function startWindowDrag(e: PointerEvent) {
+    if (!desktop || e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('button, a, input, select, textarea')) return;
+    getCurrentWindow()
+      .startDragging()
+      .catch(() => {});
+  }
+
+  function minimizeWindow() {
+    if (!desktop) return;
+    call('window_minimize').catch(() => {
+      getCurrentWindow()
+        .minimize()
+        .catch(() => {});
+    });
+  }
+
+  function closeToMascot() {
+    if (!desktop) return;
+    call('window_close_to_mascot').catch(() => {
+      getCurrentWindow()
+        .hide()
+        .catch(() => {});
+    });
+  }
 
   const workspaceRoutes = [
     ['home', 'Tổng quan'],
@@ -165,6 +197,7 @@
     fromHash();
     window.addEventListener('hashchange', fromHash);
     let off: (() => void) | undefined;
+    let offOpened: (() => void) | undefined;
     let offNotes: (() => void) | undefined;
     let offReminders: (() => void) | undefined;
     const offToday: (() => void)[] = [];
@@ -195,13 +228,19 @@
         disposed ? f() : (offNotes = f),
       );
     let disposed = false;
-    if (desktop)
+    if (desktop) {
       listen<string>('shell-navigate', (e) => navigate(e.payload)).then((f) =>
         disposed ? f() : (off = f),
       );
+      listen<string>('shell-opened', (e) => {
+        navigate(e.payload || 'chat');
+        intro?.play();
+      }).then((f) => (disposed ? f() : (offOpened = f)));
+    }
     return () => {
       disposed = true;
       off?.();
+      offOpened?.();
       offNotes?.();
       offReminders?.();
       offToday.forEach((f) => f());
@@ -213,6 +252,7 @@
 
 <div
   class="shell"
+  class:intro-staging={introStaging}
   class:chat-layout={isChat}
   class:workspace-layout={isWorkspace}
   class:settings-layout={isSettings}
@@ -234,7 +274,13 @@
         onclick={() => navigate('chat')}
         title={t('Trò chuyện', $locale)}
       >
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+        >
           <path d="M4 5h16v11H9l-5 4V5Z" />
         </svg>
         <span>← {t('Trò chuyện', $locale)}</span>
@@ -273,20 +319,35 @@
             ? 'Offline'
             : config.mode === 'hybrid'
               ? 'Hybrid'
-              : 'Online'} · {config.modelSource === 'cloudflare'
-            ? 'Cloudflare'
-            : config.chatProvider === 'openai_compat'
-              ? config.openaiModel || 'OpenAI-compatible'
-              : config.model}
+              : 'Online'} · {config.mode === 'offline' ||
+          config.chatProvider === 'local'
+            ? config.localModel || 'Local (Ollama)'
+            : config.modelSource === 'cloudflare'
+              ? 'Cloudflare'
+              : config.chatProvider === 'openai_compat'
+                ? config.openaiModel || 'OpenAI-compatible'
+                : config.model}
         </span>
         <span><i aria-hidden="true"></i> Đồng bộ: {syncText}</span>
       </div>
     </aside>
   {/if}
 
-  <main class="shell-main">
-    <!-- Top Navigation Bar -->
-    <header class="shell-topbar">
+  <main class="shell-main" class:intro-staging={introStaging}>
+    <RezeIntro
+      bind:this={intro}
+      bind:staging={introStaging}
+      active={true}
+      reduced={config.reducedMotion}
+    />
+
+    <!-- Custom Frameless Window Bar & Top Navigation -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <header
+      class="shell-topbar"
+      data-tauri-drag-region
+      onpointerdown={startWindowDrag}
+    >
       {#if isWorkspace}
         <button
           class="sidebar-toggle"
@@ -306,18 +367,20 @@
             <path d="M9 4v16" />
           </svg>
         </button>
-        <span class="topbar-crumb">
-          <strong>Không gian làm việc</strong> / {workspaceRoutes.find(([id]) => id === route)?.[1] || ''}
+        <span class="topbar-crumb" data-tauri-drag-region>
+          <strong>Không gian làm việc</strong> / {workspaceRoutes.find(
+            ([id]) => id === route,
+          )?.[1] || ''}
         </span>
       {:else if !isChat}
-        <div class="topbar-brand">
+        <div class="topbar-brand" data-tauri-drag-region>
           <span class="topbar-logo-icon">🌸</span>
           <span class="topbar-logo-text">Michiyo</span>
           <span class="topbar-status-dot" title="Sẵn sàng"></span>
         </div>
       {/if}
 
-      <div class="topbar-spacer"></div>
+      <div class="topbar-spacer" data-tauri-drag-region></div>
 
       <nav class="topbar-nav" aria-label="Điều hướng thanh trên">
         {#if !isChat}
@@ -327,7 +390,13 @@
             title={t('Trò chuyện', $locale)}
             aria-label={t('Trò chuyện', $locale)}
           >
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
               <path d="M4 5h16v11H9l-5 4V5Z" />
             </svg>
             <span class="sr-only">{t('Trò chuyện', $locale)}</span>
@@ -341,7 +410,13 @@
           title={t('Không gian làm việc', $locale)}
           aria-label={t('Không gian làm việc', $locale)}
         >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
             <path d="M3 10.5 12 3l9 7.5M5 9v11h14V9M9 20v-6h6v6" />
           </svg>
           <span class="sr-only">{t('Không gian làm việc', $locale)}</span>
@@ -354,13 +429,58 @@
           title={t('Cài đặt', $locale)}
           aria-label={t('Cài đặt', $locale)}
         >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
             <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
           </svg>
           <span class="sr-only">{t('Cài đặt', $locale)}</span>
         </button>
       </nav>
+
+      <div class="window-controls" aria-label="Điều khiển cửa sổ">
+        <button
+          type="button"
+          class="win-ctrl-btn win-minimize"
+          onclick={minimizeWindow}
+          title="Thu gọn"
+          aria-label="Thu gọn cửa sổ"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M5 12h14" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="win-ctrl-btn win-close"
+          onclick={closeToMascot}
+          title="Đóng Chat và chuyển sang Reze Pet"
+          aria-label="Đóng cửa sổ"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
     </header>
 
     <ReminderBar {due} error={reminderError} onAnswer={answer} />
@@ -419,6 +539,13 @@
     overflow: hidden;
     background: #f6f8f5;
     color: #24352b;
+    transition: background-color 320ms ease;
+  }
+  .shell.intro-staging {
+    background: transparent;
+  }
+  .shell.intro-staging > aside {
+    opacity: 0;
   }
   .shell.chat-layout,
   .shell.settings-layout {
@@ -433,14 +560,22 @@
   .sidebar-closed > aside {
     padding: 20px 8px 14px;
   }
-  .sidebar-closed .brand { justify-content: center; padding: 0 0 16px; }
+  .sidebar-closed .brand {
+    justify-content: center;
+    padding: 0 0 16px;
+  }
   .sidebar-closed .brand-copy,
   .sidebar-closed .aside-chat-action span,
   .sidebar-closed .nav-heading,
   .sidebar-closed aside nav button span,
-  .sidebar-closed .shell-status { display: none; }
+  .sidebar-closed .shell-status {
+    display: none;
+  }
   .sidebar-closed .aside-chat-action,
-  .sidebar-closed aside nav button { justify-content: center; padding: 10px; }
+  .sidebar-closed aside nav button {
+    justify-content: center;
+    padding: 10px;
+  }
 
   aside {
     display: flex;
@@ -542,7 +677,10 @@
     height: 16px;
     flex-shrink: 0;
   }
-  aside nav button span { color: inherit; font-size: inherit; }
+  aside nav button span {
+    color: inherit;
+    font-size: inherit;
+  }
   aside nav button:hover {
     background: #e2ebe1;
     color: #1f3024;
@@ -579,27 +717,45 @@
     overflow: hidden;
     position: relative;
   }
+  .shell-topbar,
+  .shell-chat-container,
+  .shell-page,
+  .shell-settings {
+    transition: opacity 320ms ease;
+  }
+  .shell-main.intro-staging .shell-topbar,
+  .shell-main.intro-staging .shell-chat-container,
+  .shell-main.intro-staging .shell-page,
+  .shell-main.intro-staging .shell-settings {
+    opacity: 0;
+  }
 
-  /* Shell Topbar */
+  /* Shell Topbar (Frameless Window Bar) */
   .shell-topbar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 24px;
+    gap: 10px;
+    padding: 8px 14px 8px 20px;
     background: #ffffff;
     border-bottom: 1px solid #e2e8e1;
-    min-height: 60px;
+    min-height: 48px;
     flex-shrink: 0;
     margin: 0;
+    user-select: none;
   }
   .chat-layout .shell-topbar {
     position: absolute;
-    top: 16px;
-    right: 24px;
-    z-index: 2;
-    min-height: 0;
-    padding: 0;
-    background: transparent;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    min-height: 48px;
+    padding: 8px 14px 8px 20px;
+    background: linear-gradient(
+      180deg,
+      rgba(246, 248, 245, 0.92) 60%,
+      rgba(246, 248, 245, 0) 100%
+    );
     border: 0;
   }
   .topbar-brand {
@@ -650,21 +806,22 @@
   }
   .topbar-spacer {
     flex: 1;
+    align-self: stretch;
   }
 
   .topbar-nav {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
     flex: none;
     border: 0;
     padding: 0;
   }
   .floating-icon-btn {
-    width: 38px;
-    height: 38px;
-    border-radius: 12px;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
     background: #ffffff;
     border: 1px solid #dce4dc;
     color: #44594a;
@@ -672,20 +829,20 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(40, 70, 50, 0.05);
-    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 2px 6px rgba(40, 70, 50, 0.04);
+    transition: all 0.16s ease;
     margin: 0;
+    padding: 0;
   }
   .floating-icon-btn svg {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
   }
   .floating-icon-btn:hover {
     background: #eef4ee;
     color: #224730;
     border-color: #cad8cc;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 14px rgba(40, 70, 50, 0.12);
+    transform: translateY(-1px);
   }
   .floating-icon-btn.active {
     background: #345c43;
@@ -695,6 +852,46 @@
   .floating-icon-btn.active:hover {
     background: #274733;
   }
+
+  /* Custom Window Controls (Minimize & Close to Mascot) */
+  .window-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: 8px;
+    margin-left: 2px;
+    border-left: 1px solid #dce4dc;
+  }
+  .win-ctrl-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 0;
+    background: transparent;
+    color: #526658;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    margin: 0;
+    transition:
+      background 0.14s ease,
+      color 0.14s ease;
+  }
+  .win-ctrl-btn svg {
+    width: 15px;
+    height: 15px;
+  }
+  .win-ctrl-btn.win-minimize:hover {
+    background: #e5ece5;
+    color: #1f3325;
+  }
+  .win-ctrl-btn.win-close:hover {
+    background: #e84118;
+    color: #ffffff;
+  }
+
   .sr-only {
     position: absolute;
     width: 1px;
@@ -707,31 +904,47 @@
     border-width: 0;
   }
 
-  /* Chat Container */
+  /* Chat Container - full width so scrollbar sits flush on right edge */
   .shell-chat-container {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    max-width: 900px;
     width: 100%;
-    margin: 0 auto;
-    padding: 16px 24px 20px;
+    max-width: none;
+    margin: 0;
+    padding: 48px 0 14px;
     overflow: hidden;
   }
-  .chat-layout .shell-chat-container { padding-top: 68px; }
 
   /* Workspace Pages */
   .shell-page {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 32px 40px;
-    max-width: 1100px;
+    padding: 28px 36px;
     width: 100%;
-    margin: 0 auto;
+    margin: 0;
     scrollbar-width: thin;
-    scrollbar-color: #c9d2ca transparent;
+    scrollbar-color: #c2cfc3 transparent;
+  }
+  .shell-page::-webkit-scrollbar {
+    width: 6px;
+  }
+  .shell-page::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .shell-page::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .shell-page::-webkit-scrollbar-thumb {
+    background: #c2cfc3;
+    border-radius: 999px;
+  }
+  .shell-page::-webkit-scrollbar-thumb:hover {
+    background: #9db09f;
   }
   .shell-settings {
     flex: 1;
@@ -752,19 +965,35 @@
       grid-template-columns: 64px minmax(0, 1fr);
     }
     .shell-chat-container {
-      padding: 10px 14px 14px;
+      padding: 46px 0 12px;
     }
     .shell-page {
       padding: 20px 18px;
     }
   }
   @media (max-width: 520px) {
-    .shell.workspace-layout { grid-template-columns: 160px minmax(0, 1fr); }
-    .shell.workspace-layout.sidebar-closed { grid-template-columns: 64px minmax(0, 1fr); }
-    .shell-topbar { padding: 8px 12px; gap: 8px; }
-    .chat-layout .shell-topbar { top: 12px; right: 14px; padding: 0; }
-    .topbar-nav { gap: 4px; }
-    .floating-icon-btn { width: 34px; height: 34px; }
-    .topbar-crumb strong { display: none; }
+    .shell.workspace-layout {
+      grid-template-columns: 160px minmax(0, 1fr);
+    }
+    .shell.workspace-layout.sidebar-closed {
+      grid-template-columns: 64px minmax(0, 1fr);
+    }
+    .shell-topbar {
+      padding: 8px 12px;
+      gap: 6px;
+    }
+    .chat-layout .shell-topbar {
+      padding: 8px 12px;
+    }
+    .topbar-nav {
+      gap: 4px;
+    }
+    .floating-icon-btn {
+      width: 30px;
+      height: 30px;
+    }
+    .topbar-crumb strong {
+      display: none;
+    }
   }
 </style>
