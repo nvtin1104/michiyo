@@ -1,0 +1,134 @@
+{
+  "version": "621c63c4e62bf64660d4e0dc30ee7d2bd80dce58615acbb2c3014e3d5e8fa4f1",
+  "main_module": "index.js",
+  "modules": [
+    {
+      "name": "index.js",
+      "type": "application/javascript+module"
+    }
+  ],
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "DEFAULT_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct",
+    "ALLOWED_CHAT_MODELS": "@cf/meta/llama-3.1-8b-instruct,@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+  },
+  "migrations": [
+    "0001_baseline.sql",
+    "0002_owner_sessions.sql"
+  ],
+  "assets": [
+    {
+      "path": "/index.html",
+      "hash": "bc050258af0f23165d29890ec9876b8f",
+      "size": 1236,
+      "file": "assets/index.html"
+    },
+    {
+      "path": "/_app/immutable/assets/2.Buj39s1e.css",
+      "hash": "aa8357ce4acbec6982ea8135af181d52",
+      "size": 3096,
+      "file": "assets/_app/immutable/assets/2.Buj39s1e.css"
+    },
+    {
+      "path": "/_app/immutable/assets/3.Cqx13NCx.css",
+      "hash": "6aca34ff4eda50b3de77e3041d0bfcd2",
+      "size": 564,
+      "file": "assets/_app/immutable/assets/3.Cqx13NCx.css"
+    },
+    {
+      "path": "/_app/immutable/chunks/Bjy-W4x2.js",
+      "hash": "f07424758318dd6b5f32b0fe8de9d2ff",
+      "size": 1365,
+      "file": "assets/_app/immutable/chunks/Bjy-W4x2.js"
+    },
+    {
+      "path": "/_app/immutable/chunks/CBQb_Cvs.js",
+      "hash": "c3819620a42d121ccf354f8b989fb9c1",
+      "size": 39718,
+      "file": "assets/_app/immutable/chunks/CBQb_Cvs.js"
+    },
+    {
+      "path": "/_app/immutable/chunks/CRzLMJPS.js",
+      "hash": "bcc465e3e61dc3878a69ffa95ccb53cb",
+      "size": 1534,
+      "file": "assets/_app/immutable/chunks/CRzLMJPS.js"
+    },
+    {
+      "path": "/_app/immutable/chunks/Db1XPDWB.js",
+      "hash": "f5ccafeaa73b10d4970108c80e0d3bba",
+      "size": 43615,
+      "file": "assets/_app/immutable/chunks/Db1XPDWB.js"
+    },
+    {
+      "path": "/_app/immutable/chunks/DQkoN3kk.js",
+      "hash": "f0e3e65368412cf42a71d650951428fa",
+      "size": 4291,
+      "file": "assets/_app/immutable/chunks/DQkoN3kk.js"
+    },
+    {
+      "path": "/_app/immutable/chunks/GdtJmZ4p.js",
+      "hash": "782cab6be40b23411d88517da44932b0",
+      "size": 38,
+      "file": "assets/_app/immutable/chunks/GdtJmZ4p.js"
+    },
+    {
+      "path": "/_app/immutable/entry/app.CCTlyJeP.js",
+      "hash": "2e439db2f130b282a08f0e51d8612b83",
+      "size": 1270,
+      "file": "assets/_app/immutable/entry/app.CCTlyJeP.js"
+    },
+    {
+      "path": "/_app/immutable/entry/payload.DSmR2FwN.js",
+      "hash": "b7cba7b44b2397c7d28f7db4a34ec734",
+      "size": 65,
+      "file": "assets/_app/immutable/entry/payload.DSmR2FwN.js"
+    },
+    {
+      "path": "/_app/immutable/entry/start.4h2Zy3CF.js",
+      "hash": "6380220d5c641a638caa2f7289740bcb",
+      "size": 522,
+      "file": "assets/_app/immutable/entry/start.4h2Zy3CF.js"
+    },
+    {
+      "path": "/_app/immutable/nodes/0.ByZVH310.js",
+      "hash": "19d354133e70a5dd5aae83417038e086",
+      "size": 342,
+      "file": "assets/_app/immutable/nodes/0.ByZVH310.js"
+    },
+    {
+      "path": "/_app/immutable/nodes/1.ajE3qTkg.js",
+      "hash": "6e419d6df3e441f8cb67d151f6a9b5a3",
+      "size": 322,
+      "file": "assets/_app/immutable/nodes/1.ajE3qTkg.js"
+    },
+    {
+      "path": "/_app/immutable/nodes/2.Bkxuw0gx.js",
+      "hash": "bf157ce2641f8eebeac28364ad443e76",
+      "size": 19044,
+      "file": "assets/_app/immutable/nodes/2.Bkxuw0gx.js"
+    },
+    {
+      "path": "/_app/immutable/nodes/3.DAKEp7FL.js",
+      "hash": "7f179ca6057ebf7b07acc32d20aaada8",
+      "size": 1611,
+      "file": "assets/_app/immutable/nodes/3.DAKEp7FL.js"
+    },
+    {
+      "path": "/_app/version.json",
+      "hash": "63d864ccffe7d4a854e857a3ab3d3aa5",
+      "size": 27,
+      "file": "assets/_app/version.json"
+    }
+  ],
+  "assets_config": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*",
+      "/v1/*"
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod ai;
+pub mod cloud_setup;
 mod commands;
 mod config;
 mod db;
@@ -47,7 +48,6 @@ fn main() {
             commands::history_delete,
             commands::save_secret,
             commands::secret_status,
-            commands::translate,
             commands::chat,
             commands::stop_chat,
             commands::test_connection,
@@ -57,6 +57,11 @@ fn main() {
             commands::local_cancel_pull,
             commands::local_delete_model,
             commands::cloud_pair,
+            commands::cloud_backend_verify,
+            commands::cloud_ai_verify,
+            commands::cloud_backend_deploy,
+            commands::cloud_add_device,
+            commands::cloud_open_admin,
             sync::sync_status,
             sync::sync_now,
             commands::ai_summarize,
@@ -66,17 +71,13 @@ fn main() {
             commands::open_main,
             commands::window_minimize,
             commands::window_close_to_mascot,
-            commands::open_translation_in_main,
             commands::open_chat_in_main,
             commands::take_shell_chat_draft,
-            commands::take_translation_draft,
             commands::apply_config,
             commands::set_hit_mask,
             commands::skins::list_skins,
             commands::skins::load_skin,
-            commands::take_selection,
             commands::take_chat_prompt,
-            commands::ask_translation,
             commands::reset_position,
             commands::motion::motion_scene,
             commands::motion::motion_position,
@@ -184,45 +185,6 @@ fn main() {
                         if last_hit != Some(hit) {
                             last_hit = Some(hit);
                             let _ = w.set_ignore_cursor_events(!hit);
-                        }
-                    }
-                }
-            });
-            let h = app.handle().clone();
-            std::thread::spawn(move || {
-                let mut last = String::new();
-                let mut watching = false;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(900));
-                    let runtime = h.state::<commands::Runtime>();
-                    if runtime.capturing.load(std::sync::atomic::Ordering::SeqCst) {
-                        continue;
-                    }
-                    if !runtime
-                        .clipboard_watch
-                        .load(std::sync::atomic::Ordering::SeqCst)
-                    {
-                        watching = false;
-                        continue;
-                    }
-                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                        if let Ok(text) = clipboard.get_text() {
-                            if !watching {
-                                last = text;
-                                watching = true;
-                                continue;
-                            }
-                            let ignored = runtime.ignored_clipboard.lock().unwrap().take();
-                            if ignored.as_ref() == Some(&text) {
-                                last = text;
-                                continue;
-                            }
-                            if text != last && !text.trim().is_empty() {
-                                last = text.clone();
-                                let _ = commands::show_panel(&h, "translate", true);
-                                *runtime.pending_selection.lock().unwrap() = Some(text);
-                                let _ = h.emit_to("translate", "selection", ());
-                            }
                         }
                     }
                 }

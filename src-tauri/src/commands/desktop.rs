@@ -36,28 +36,6 @@ pub fn take_shell_chat_draft(state: tauri::State<'_, Runtime>) -> Option<Value> 
 }
 
 #[tauri::command]
-pub async fn open_translation_in_main(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, Runtime>,
-    text: String,
-    result: Value,
-) -> Result<(), String> {
-    if text.len() > 100_000 || result.to_string().len() > 200_000 {
-        return Err("Bản dịch quá dài".into());
-    }
-    *state
-        .pending_translation_draft
-        .lock()
-        .map_err(|_| "Không mở được bản dịch")? = Some(json!({"text": text, "result": result}));
-    open_main_impl(app, "translate".into())
-}
-
-#[tauri::command]
-pub fn take_translation_draft(state: tauri::State<'_, Runtime>) -> Option<Value> {
-    state.pending_translation_draft.lock().ok()?.take()
-}
-
-#[tauri::command]
 pub async fn open_main(app: tauri::AppHandle, route: String) -> Result<(), String> {
     open_main_impl(app, route)
 }
@@ -65,15 +43,7 @@ pub async fn open_main(app: tauri::AppHandle, route: String) -> Result<(), Strin
 // WebviewWindowBuilder must run off the Windows event thread.
 pub(crate) fn open_main_impl(app: tauri::AppHandle, route: String) -> Result<(), String> {
     if ![
-        "home",
-        "chat",
-        "translate",
-        "notes",
-        "habits",
-        "calendar",
-        "history",
-        "bot",
-        "settings",
+        "home", "chat", "notes", "habits", "calendar", "history", "bot", "settings",
     ]
     .contains(&route.as_str())
     {
@@ -176,7 +146,6 @@ pub fn show_panel(app: &tauri::AppHandle, label: &str, cursor: bool) -> Result<(
     } else {
         let (title, width, height) = match label {
             "chat" => ("Michiyo · Chat", 320., 44.),
-            "translate" => ("Michiyo · Dịch", 420., 400.),
             "settings" => ("Michiyo · Cài đặt", 720., 540.),
             "menu" => ("Michiyo · Menu", 156., 190.),
             _ => return Err("Cửa sổ không hợp lệ".into()),
@@ -253,7 +222,7 @@ pub async fn menu_action(app: tauri::AppHandle, action: String) -> Result<(), St
     }
     match action.as_str() {
         "main" => open_main_impl(app, "chat".into()),
-        "chat" | "translate" | "settings" => open_main_impl(app, action),
+        "chat" | "settings" => open_main_impl(app, action),
         "hide" => {
             if let Some(w) = app.get_webview_window("mascot") {
                 w.hide().map_err(|e| e.to_string())?;
@@ -387,7 +356,7 @@ pub(crate) fn position_panel(
 
 #[tauri::command]
 pub async fn open_panel(app: tauri::AppHandle, label: String) -> Result<(), String> {
-    if !["chat", "settings", "translate"].contains(&label.as_str()) {
+    if !["chat", "settings"].contains(&label.as_str()) {
         return Err("Cửa sổ không hợp lệ".into());
     }
     if label == "chat" {
@@ -413,83 +382,6 @@ pub fn save_mascot_position(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn capture_selection(app: tauri::AppHandle) {
-    use std::sync::atomic::Ordering;
-    if app
-        .state::<Runtime>()
-        .capturing
-        .swap(true, Ordering::SeqCst)
-    {
-        return;
-    }
-    let result = tauri::async_runtime::spawn_blocking(|| -> Result<String, String> {
-        use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-        std::thread::sleep(std::time::Duration::from_millis(180));
-        let mut cb = arboard::Clipboard::new().map_err(|_| "Không mở được clipboard")?;
-        let old = cb.get_text().ok();
-        let image = cb.get_image().ok();
-        let mut enigo =
-            Enigo::new(&Settings::default()).map_err(|_| "Không giả lập được bàn phím")?;
-        let marker = format!("michiyo-selection-{:?}", std::time::SystemTime::now());
-        cb.set_text(&marker).map_err(|_| "Clipboard đang bận")?;
-        let selected = (|| -> Result<String, String> {
-            let modifier = if cfg!(target_os = "macos") {
-                Key::Meta
-            } else {
-                Key::Control
-            };
-            let _ = enigo.key(Key::Alt, Direction::Release);
-            enigo
-                .key(modifier, Direction::Press)
-                .map_err(|e| e.to_string())?;
-            let copied = enigo.key(Key::Unicode('c'), Direction::Click);
-            let _ = enigo.key(modifier, Direction::Release);
-            copied.map_err(|e| e.to_string())?;
-            for _ in 0..12 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                if let Ok(text) = cb.get_text() {
-                    if text != marker && !text.trim().is_empty() {
-                        return Ok(text);
-                    }
-                }
-            }
-            Err("Không có văn bản được chọn. Hãy bôi đen văn bản rồi thử lại.".into())
-        })();
-        if let Some(img) = image {
-            cb.set_image(img)
-                .map_err(|_| "Không khôi phục được clipboard ảnh")?;
-        } else if let Some(text) = old {
-            cb.set_text(text)
-                .map_err(|_| "Không khôi phục được clipboard")?;
-        } else {
-            let _ = cb.clear();
-        }
-        selected
-    })
-    .await;
-    app.state::<Runtime>()
-        .capturing
-        .store(false, Ordering::SeqCst);
-    match result {
-        Ok(Ok(text)) => {
-            let _ = show_panel(&app, "translate", true);
-            *app.state::<Runtime>().pending_capture_error.lock().unwrap() = None;
-            *app.state::<Runtime>().pending_selection.lock().unwrap() = Some(text);
-            let _ = app.emit_to("translate", "selection", ());
-        }
-        other => {
-            let message = match other {
-                Ok(Err(e)) => e,
-                _ => "Không lấy được văn bản".into(),
-            };
-            let _ = show_panel(&app, "translate", true);
-            *app.state::<Runtime>().pending_capture_error.lock().unwrap() = Some(message);
-            let _ = app.emit_to("translate", "selection", ());
-            let _ = app.emit("mascot-state", "error");
-        }
-    }
-}
-
 fn register_shortcuts(
     app: &tauri::AppHandle,
     keys: &[(String, &'static str)],
@@ -505,12 +397,6 @@ fn register_shortcuts(
                     return;
                 }
                 match action {
-                    "translate" => {
-                        let h = handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            capture_selection(h).await;
-                        });
-                    }
                     "main" | "chat" => {
                         let h = handle.clone();
                         tauri::async_runtime::spawn(async move {
@@ -537,19 +423,10 @@ fn register_shortcuts(
 
 #[tauri::command]
 pub async fn apply_config(app: tauri::AppHandle) -> Result<(), String> {
-    use std::sync::atomic::Ordering;
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
     let c = config::read(&app)?;
     let state = app.state::<Runtime>();
-    state.clipboard_watch.store(
-        c["clipboardWatch"].as_bool() == Some(true),
-        Ordering::SeqCst,
-    );
     let shortcuts = vec![
-        (
-            config::string(&c, "translateShortcut", "Ctrl+Alt+T"),
-            "translate",
-        ),
         (config::string(&c, "chatShortcut", "Ctrl+Alt+C"), "chat"),
         (config::string(&c, "toggleShortcut", "Ctrl+Alt+M"), "toggle"),
         (
@@ -623,17 +500,6 @@ pub fn ensure_mascot_on_screen(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn take_selection(state: tauri::State<'_, Runtime>) -> Value {
-    if let Some(text) = state.pending_selection.lock().unwrap().take() {
-        json!({"text":text})
-    } else if let Some(error) = state.pending_capture_error.lock().unwrap().take() {
-        json!({"error":error})
-    } else {
-        Value::Null
-    }
-}
-
-#[tauri::command]
 pub fn copy_text(
     app: tauri::AppHandle,
     state: tauri::State<'_, Runtime>,
@@ -649,14 +515,6 @@ pub fn copy_text(
 #[tauri::command]
 pub fn take_chat_prompt(state: tauri::State<'_, Runtime>) -> Option<String> {
     state.pending_chat.lock().unwrap().take()
-}
-
-#[tauri::command]
-pub async fn ask_translation(app: tauri::AppHandle, text: String) -> Result<(), String> {
-    *app.state::<Runtime>().pending_chat.lock().unwrap() = Some(text);
-    show_panel(&app, "chat", false)?;
-    let _ = app.emit_to("chat", "ask-translation", ());
-    Ok(())
 }
 
 #[tauri::command]

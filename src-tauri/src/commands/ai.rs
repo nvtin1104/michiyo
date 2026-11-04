@@ -1,9 +1,5 @@
 use super::{record_activity, Runtime};
-use crate::{
-    config,
-    providers::{Provider, Translation, Translator},
-    secrets,
-};
+use crate::{config, secrets};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::Emitter;
@@ -19,110 +15,19 @@ pub fn save_secret(app: tauri::AppHandle, name: String, value: String) -> Result
 pub fn secret_status() -> Value {
     json!({
         "claude": secrets::get("claude").is_ok(),
-        "google": secrets::get("google").is_ok(),
-        "libre": secrets::get("libre").is_ok(),
         "openai": secrets::get("openai").is_ok(),
         "cloud": secrets::get("cloud").is_ok(),
+        "cloudflare_ai": secrets::get("cloudflare_ai").is_ok(),
+        "cloudflare_deploy": secrets::get("cloudflare_deploy").is_ok(),
     })
 }
 
-#[tauri::command]
-pub async fn translate(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, Runtime>,
-    text: String,
-    engine: Option<String>,
-) -> Result<Translation, String> {
-    if text.trim().is_empty() || text.chars().count() > 10000 {
-        return Err("Hãy chọn từ 1 đến 10.000 ký tự".into());
+/// Keychain entry holding the bearer token for a Cloudflare-backed model.
+fn backend_secret(backend: &crate::ai::Backend) -> &'static str {
+    match backend {
+        crate::ai::Backend::WorkersAi { .. } => "cloudflare_ai",
+        _ => "cloud",
     }
-    let c = config::read(&app)?;
-    let detected = whatlang::detect(&text)
-        .map(|i| {
-            if i.lang() == whatlang::Lang::Vie {
-                "vi"
-            } else {
-                isolang::Language::from_639_3(i.lang().code())
-                    .and_then(|l| l.to_639_1())
-                    .unwrap_or("en")
-            }
-        })
-        .unwrap_or("en");
-    let src = config::string(&c, "source", "auto");
-    let src = if src == "auto" {
-        detected.to_string()
-    } else {
-        src
-    };
-    let target = config::string(&c, "target", "vi");
-    let tgt = if src == target {
-        config::string(&c, "alternate", "en")
-    } else {
-        target
-    };
-    let key = format!("{text}|{src}|{tgt}|{c}|{engine:?}");
-    let cached = state.cache.lock().unwrap().get(&key).cloned();
-    if let Some(result) = cached {
-        record_activity(
-            &app,
-            &state,
-            "translation",
-            json!({"engine": result.engine}),
-        );
-        return Ok(result);
-    }
-    let names = engine.map(|e| vec![e]).unwrap_or_else(|| {
-        c["providers"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or(vec!["mymemory".into()])
-    });
-    let names: Vec<String> = names
-        .into_iter()
-        .filter(|name| crate::ai::translator_allowed(&c, name))
-        .collect();
-    if names.is_empty() {
-        return Err("Chế độ Offline: không có engine dịch chạy trên máy này. Hãy dùng LibreTranslate trên localhost hoặc đổi chế độ.".into());
-    }
-    let mut errors = vec![];
-    let _ = app.emit("mascot-state", "thinking");
-    for name in names {
-        let p = Provider {
-            name: name.clone(),
-            client: state.client.clone(),
-            base: None,
-            app: Some(app.clone()),
-        };
-        match p.translate(&text, &src, &tgt, &c).await {
-            Ok(output) => {
-                let result = Translation {
-                    text: output,
-                    engine: name,
-                    source: src,
-                    target: tgt,
-                };
-                state.cache.lock().unwrap().put(key, result.clone());
-                record_activity(
-                    &app,
-                    &state,
-                    "translation",
-                    json!({"engine": result.engine}),
-                );
-                let _ = app.emit("mascot-state", "happy");
-                return Ok(result);
-            }
-            Err(e) => errors.push(format!("{}: {}", name, e)),
-        }
-        if c["fallback"].as_bool() == Some(false) {
-            break;
-        }
-    }
-    let _ = app.emit("mascot-state", "error");
-    Err(errors.join(" · "))
 }
 
 #[tauri::command]
@@ -206,8 +111,9 @@ pub async fn chat(
                     )
                     .await
                 }
-                crate::ai::Backend::Cloudflare { base, model } => {
-                    let key = secrets::get("cloud").ok();
+                crate::ai::Backend::Cloudflare { base, model }
+                | crate::ai::Backend::WorkersAi { base, model } => {
+                    let key = secrets::get(backend_secret(&backend)).ok();
                     crate::ai::stream_chat(
                         &state.client,
                         base,
@@ -299,8 +205,9 @@ async fn complete_once(
                 )
                 .await
             }
-            crate::ai::Backend::Cloudflare { base, model } => {
-                let key = secrets::get("cloud").ok();
+            crate::ai::Backend::Cloudflare { base, model }
+            | crate::ai::Backend::WorkersAi { base, model } => {
+                let key = secrets::get(backend_secret(&backend)).ok();
                 crate::ai::stream_chat(
                     &state.client,
                     base,
@@ -420,6 +327,15 @@ pub async fn ai_models(
             config::string(&c, "openaiBase", "https://api.openai.com/v1"),
             secrets::get("openai").ok(),
         ),
+        "workersai" => {
+            let account = config::string(&c, "workersAiAccount", "");
+            if !crate::ai::valid_account_id(&account) {
+                return Err("Chưa cấu hình tài khoản Cloudflare hợp lệ".into());
+            }
+            let key = secrets::get("cloudflare_ai").ok();
+            let base = crate::ai::workers_ai_base(&account);
+            return crate::ai::list_models(&state.client, &base, key.as_deref()).await;
+        }
         _ => return Err("Nguồn model không hợp lệ".into()),
     };
     crate::ai::list_models(&state.client, &base, key.as_deref()).await
@@ -481,7 +397,7 @@ pub async fn local_delete_model(
 #[tauri::command]
 pub async fn test_connection(
     app: tauri::AppHandle,
-    state: tauri::State<'_, Runtime>,
+    _state: tauri::State<'_, Runtime>,
     name: String,
 ) -> Result<String, String> {
     if name == "claude" {
@@ -499,15 +415,166 @@ pub async fn test_connection(
             |_| {},
         )
         .await?;
+        Ok("Kết nối thành công".into())
     } else {
-        let p = Provider {
-            name,
-            client: state.client.clone(),
-            base: None,
-            app: Some(app.clone()),
-        };
-        p.translate("Hello", "en", "vi", &config::read(&app)?)
-            .await?;
+        Err(format!("Không hỗ trợ kiểm tra kết nối cho {name}"))
     }
-    Ok("Kết nối thành công".into())
+}
+
+#[tauri::command]
+pub async fn cloud_backend_verify(
+    _app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    token: String,
+) -> Result<Vec<crate::cloud_setup::cloudflare::Account>, String> {
+    let cf = crate::cloud_setup::cloudflare::Cf::new(&state.client, &crate::ai::cloudflare_api(), &token);
+    cf.accounts().await
+}
+
+#[tauri::command]
+pub async fn cloud_ai_verify(
+    _app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    token: String,
+) -> Result<Vec<crate::cloud_setup::cloudflare::Account>, String> {
+    let cf = crate::cloud_setup::cloudflare::Cf::new(&state.client, &crate::ai::cloudflare_api(), &token);
+    let accounts = cf.accounts().await?;
+    if let Some(acc) = accounts.first() {
+        let _ = cf.text_models(&acc.id).await?;
+    }
+    Ok(accounts)
+}
+
+#[tauri::command]
+pub async fn cloud_backend_deploy(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    account_id: String,
+    token: String,
+    remember: bool,
+) -> Result<Value, String> {
+    let manifest: crate::cloud_setup::Manifest = serde_json::from_str(crate::cloud_setup::MANIFEST_JSON)
+        .map_err(|e| format!("Lỗi đọc manifest backend: {}", e))?;
+
+    let emit_progress = |progress: crate::cloud_setup::DeployProgress| {
+        let _ = app.emit("cloud-deploy-progress", progress);
+    };
+
+    let cf = crate::cloud_setup::cloudflare::Cf::new(&state.client, &crate::ai::cloudflare_api(), &token);
+
+    emit_progress(crate::cloud_setup::DeployProgress {
+        step: "d1".into(),
+        status: "running".into(),
+        message: "Đang kiểm tra và khởi tạo cơ sở dữ liệu D1...".into(),
+    });
+
+    let d1_id = cf.ensure_d1(&account_id, "michiyo").await?;
+
+    crate::cloud_setup::run_migrations(&cf, &account_id, &d1_id, &manifest, &emit_progress).await?;
+
+    let (worker_url, bootstrap_secret) =
+        crate::cloud_setup::deploy_worker(&cf, &account_id, &d1_id, &manifest, &emit_progress).await?;
+
+    emit_progress(crate::cloud_setup::DeployProgress {
+        step: "pairing".into(),
+        status: "running".into(),
+        message: "Đang tự động ghép nối với máy tính này làm thiết bị quản trị...".into(),
+    });
+
+    let (device_id, device_token) =
+        crate::cloud_setup::bootstrap_pairing(&state.client, &worker_url, &bootstrap_secret, "Michiyo Desktop").await?;
+
+    secrets::set("cloud", &device_token)?;
+
+    if remember {
+        let _ = secrets::set("cloudflare_deploy", &token);
+    } else {
+        let _ = secrets::set("cloudflare_deploy", "");
+    }
+
+    emit_progress(crate::cloud_setup::DeployProgress {
+        step: "completed".into(),
+        status: "done".into(),
+        message: "Hoàn tất triển khai backend cá nhân!".into(),
+    });
+
+    let _ = app.emit("secrets-changed", ());
+
+    Ok(json!({
+        "url": worker_url,
+        "device_id": device_id,
+        "d1_id": d1_id,
+        "version": manifest.version
+    }))
+}
+
+#[tauri::command]
+pub async fn cloud_add_device(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+    name: String,
+) -> Result<Value, String> {
+    let c = config::read(&app)?;
+    let cloud_url = config::string(&c, "cloudUrl", "").trim_end_matches('/').to_string();
+    if cloud_url.is_empty() {
+        return Err("Chưa cấu hình địa chỉ Michiyo Cloud".into());
+    }
+    let token = secrets::get("cloud").map_err(|_| "Chưa ghép nối thiết bị quản trị".to_string())?;
+
+    let res = state
+        .client
+        .post(format!("{cloud_url}/v1/pair/start"))
+        .bearer_auth(token)
+        .json(&json!({ "name": name }))
+        .send()
+        .await
+        .map_err(|e| format!("Không kết nối được Cloud backend: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Cloud backend báo lỗi HTTP {}", res.status()));
+    }
+    res.json().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn cloud_open_admin(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Runtime>,
+) -> Result<String, String> {
+    let c = config::read(&app)?;
+    let cloud_url = config::string(&c, "cloudUrl", "").trim_end_matches('/').to_string();
+    if cloud_url.is_empty() {
+        return Err("Chưa cấu hình địa chỉ Michiyo Cloud".into());
+    }
+    let token = secrets::get("cloud").map_err(|_| "Chưa ghép nối thiết bị quản trị".to_string())?;
+
+    let res = state
+        .client
+        .post(format!("{cloud_url}/v1/admin/web-login"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("Không kết nối được Cloud backend: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Cloud backend báo lỗi HTTP {}", res.status()));
+    }
+
+    let body: Value = res.json().await.map_err(|e| e.to_string())?;
+    let code = body["code"].as_str().ok_or("Thiếu mã đăng nhập web")?;
+    let admin_url = format!("{}/login#code={}", cloud_url, code);
+
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", "", &admin_url])
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&admin_url)
+            .spawn();
+    }
+    Ok(admin_url)
 }

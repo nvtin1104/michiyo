@@ -8,11 +8,9 @@ pub use ai::*;
 pub use desktop::*;
 pub use workspace::*;
 
-use crate::providers::Translation;
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
 use tauri::{Emitter, Manager};
@@ -21,17 +19,11 @@ pub struct Runtime {
     pub history_lock: Mutex<()>,
     pub db: Mutex<Option<rusqlite::Connection>>,
     pub history_imported: std::sync::atomic::AtomicBool,
-    pub clipboard_watch: std::sync::atomic::AtomicBool,
     pub client: reqwest::Client,
-    pub cache: Mutex<lru::LruCache<String, Translation>>,
     pub jobs: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     pub mask: Mutex<Vec<bool>>,
     pub shortcuts: Mutex<Vec<(String, &'static str)>>,
-    pub capturing: std::sync::atomic::AtomicBool,
-    pub pending_selection: Mutex<Option<String>>,
-    pub pending_translation_draft: Mutex<Option<Value>>,
     pub pending_shell_chat_draft: Mutex<Option<Value>>,
-    pub pending_capture_error: Mutex<Option<String>>,
     pub ignored_clipboard: Mutex<Option<String>>,
     pub pending_chat: Mutex<Option<String>>,
     pub anchor: Mutex<Option<String>>,
@@ -47,22 +39,16 @@ impl Default for Runtime {
             history_lock: Mutex::new(()),
             db: Mutex::new(None),
             history_imported: std::sync::atomic::AtomicBool::new(false),
-            clipboard_watch: std::sync::atomic::AtomicBool::new(false),
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .timeout(std::time::Duration::from_secs(60))
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .build()
                 .unwrap(),
-            cache: Mutex::new(lru::LruCache::new(NonZeroUsize::new(128).unwrap())),
             jobs: Mutex::new(HashMap::new()),
             mask: Mutex::new(vec![false; 160 * 160]),
             shortcuts: Mutex::new(Vec::new()),
-            capturing: std::sync::atomic::AtomicBool::new(false),
-            pending_selection: Mutex::new(None),
-            pending_translation_draft: Mutex::new(None),
             pending_shell_chat_draft: Mutex::new(None),
-            pending_capture_error: Mutex::new(None),
             ignored_clipboard: Mutex::new(None),
             pending_chat: Mutex::new(None),
             anchor: Mutex::new(None),

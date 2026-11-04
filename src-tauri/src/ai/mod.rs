@@ -24,6 +24,34 @@ pub enum Backend {
         base: String,
         model: String,
     },
+    /// Workers AI called directly on the user's own Cloudflare account (OpenAI-compatible REST,
+    /// authenticated by the user's Workers AI token). No Worker needed.
+    WorkersAi {
+        base: String,
+        model: String,
+    },
+}
+
+pub const WORKERS_AI_DEFAULT_MODEL: &str = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
+const WORKERS_AI_NOT_CONNECTED: &str =
+    "Chưa thiết lập AI Cloud riêng. Hãy mở Cài đặt → Cloud riêng để kết nối Workers AI.";
+
+/// Cloudflare REST API root; overridable in tests.
+pub fn cloudflare_api() -> String {
+    std::env::var("MICHIYO_CLOUDFLARE_API")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "https://api.cloudflare.com/client/v4".into())
+}
+
+/// Cloudflare account ids are 32 lowercase hex characters.
+pub fn valid_account_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// OpenAI-compatible base for Workers AI on `account_id`.
+pub fn workers_ai_base(account_id: &str) -> String {
+    format!("{}/accounts/{account_id}/ai/v1", cloudflare_api())
 }
 
 impl Backend {
@@ -83,6 +111,15 @@ pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
             base: format!("{url}/v1/ai"),
             model: text(config, "cloudModel", "").into(),
         }
+    } else if config["modelSource"].as_str() == Some("workersai") {
+        let account = text(config, "workersAiAccount", "");
+        if !valid_account_id(account) || config["cloudFeatures"]["ai"].as_bool() == Some(false) {
+            return Err(WORKERS_AI_NOT_CONNECTED.into());
+        }
+        Backend::WorkersAi {
+            base: workers_ai_base(account),
+            model: text(config, "workersAiModel", WORKERS_AI_DEFAULT_MODEL).into(),
+        }
     } else if config["chatProvider"].as_str() == Some("local") {
         if local_model.is_empty() {
             return Err(
@@ -132,21 +169,13 @@ pub fn plan(config: &Value) -> Result<Vec<Backend>, String> {
                     return Err("Chưa chọn model. Hãy chọn model trong Cài đặt → AI.".into());
                 }
             }
-            Backend::Cloudflare { base, .. } => validate_base(base)?,
+            Backend::Cloudflare { base, .. } | Backend::WorkersAi { base, .. } => {
+                validate_base(base)?
+            }
             Backend::Claude { .. } => {}
         }
     }
     Ok(backends)
-}
-
-/// Offline keeps translation on this machine: a LibreTranslate server or local AI model on localhost qualifies.
-pub fn translator_allowed(config: &Value, engine: &str) -> bool {
-    mode(config) != "offline"
-        || (engine == "libre"
-            && is_local_url(text(config, "libreUrl", "https://libretranslate.com")))
-        || (engine == "local"
-            && is_local_url(text(config, "localBase", DEFAULT_LOCAL_BASE))
-            && !text(config, "localModel", "").is_empty())
 }
 
 #[derive(Debug, PartialEq)]
@@ -365,6 +394,27 @@ mod tests {
     }
 
     #[test]
+    fn workers_ai_needs_an_account_and_stays_remote() {
+        let account = "0123456789abcdef0123456789abcdef";
+        assert!(super::plan(&json!({"modelSource": "workersai"}))
+            .unwrap_err()
+            .contains("Cloud riêng"));
+        assert!(super::plan(&json!({"modelSource": "workersai", "workersAiAccount": "nope"})).is_err());
+        let disabled = json!({"modelSource": "workersai", "workersAiAccount": account, "cloudFeatures": {"ai": false}});
+        assert!(super::plan(&disabled).is_err());
+        let cfg = json!({"modelSource": "workersai", "workersAiAccount": account});
+        assert_eq!(
+            super::plan(&cfg).unwrap(),
+            vec![Backend::WorkersAi {
+                base: format!("https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1"),
+                model: WORKERS_AI_DEFAULT_MODEL.into()
+            }]
+        );
+        let offline = json!({"mode": "offline", "modelSource": "workersai", "workersAiAccount": account, "localModel": "llama3"});
+        assert!(matches!(super::plan(&offline).unwrap()[0], Backend::OpenAi { .. }));
+    }
+
+    #[test]
     fn rejects_unsafe_or_incomplete_endpoints() {
         for base in ["http://example.com/v1", "ftp://x", "not a url"] {
             let c =
@@ -376,21 +426,6 @@ mod tests {
         assert!(plan(&no_model).unwrap_err().contains("model"));
         assert!(is_local_url("http://localhost:11434/v1") && is_local_url("http://[::1]:8080"));
         assert!(!is_local_url("http://localhost.evil.com/v1"));
-    }
-
-    #[test]
-    fn offline_translation_only_allows_local_libre() {
-        let online = json!({});
-        assert!(translator_allowed(&online, "google"));
-        let offline = json!({"mode": "offline", "libreUrl": "http://127.0.0.1:5000"});
-        assert!(translator_allowed(&offline, "libre"));
-        let offline_local = json!({"mode": "offline", "localBase": "http://127.0.0.1:11434/v1", "localModel": "gemma3:4b"});
-        assert!(translator_allowed(&offline_local, "local"));
-        for engine in ["claude", "google", "mymemory"] {
-            assert!(!translator_allowed(&offline, engine));
-        }
-        assert!(!translator_allowed(&json!({"mode": "offline"}), "libre"));
-        assert!(!translator_allowed(&json!({"mode": "offline"}), "local"));
     }
 
     #[test]
