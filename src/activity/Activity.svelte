@@ -123,15 +123,13 @@
         >Lưu ghi chú</option
       ><option value="note_deleted">Xóa ghi chú</option><option value="chat"
         >Trò chuyện</option
-      ><option value="translation">Dịch văn bản</option><option
-        value="habit_checkin">Check-in thói quen</option
-      ><option value="habit_uncheck">Bỏ check-in</option><option
-        value="habit_saved">Lưu thói quen</option
-      ><option value="habit_deleted">Xóa thói quen</option><option
-        value="event_saved">Lưu sự kiện</option
-      ><option value="event_deleted">Xóa sự kiện</option><option
-        value="todo_done">Hoàn thành việc</option
-      ></select
+      ><option value="habit_checkin">Check-in thói quen</option><option
+        value="habit_uncheck">Bỏ check-in</option
+      ><option value="habit_saved">Lưu thói quen</option><option
+        value="habit_deleted">Xóa thói quen</option
+      ><option value="event_saved">Lưu sự kiện</option><option
+        value="event_deleted">Xóa sự kiện</option
+      ><option value="todo_done">Hoàn thành việc</option></select
     ></label
   >
   <label>Từ ngày<input type="date" bind:value={from} /></label><label

@@ -192,7 +192,7 @@
 
   onMount(() => {
     let off: undefined | (() => void);
-    let offFollow: undefined | (() => void);
+
     let offFocus: undefined | (() => void);
     let offPlacement: undefined | (() => void);
     let offSecrets: undefined | (() => void);
@@ -338,7 +338,6 @@
         if (prompt) input = prompt;
       };
       if (compact) {
-        offFollow = await listen('ask-translation', take);
         offFocus = await listen('chat-focus', focus);
         await take();
       }
@@ -354,7 +353,7 @@
 
     return () => {
       off?.();
-      offFollow?.();
+
       offFocus?.();
       offPlacement?.();
       offSecrets?.();

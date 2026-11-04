@@ -74,7 +74,7 @@ try {
   await page.screenshot({ path: 'artifacts/settings-options.png' });
   await page.locator('.settings-header').click();
   assert.equal(await page.getByRole('listbox').count(), 0);
-  for (const name of ['Chung', 'API', 'Dịch', 'Phím tắt', 'Giao diện']) {
+  for (const name of ['Chung', 'API', 'Phím tắt', 'Giao diện']) {
     await page.locator('nav button').filter({ hasText: name }).click();
     assert.equal(
       await page
@@ -89,12 +89,6 @@ try {
       false,
     );
   }
-  await page.locator('nav button').filter({ hasText: 'Dịch' }).click();
-  const source = page.getByRole('combobox', { name: 'Nguồn', exact: true });
-  await source.click();
-  await source.press('End');
-  await source.press('Enter');
-  assert.match(await source.textContent(), /Deutsch/);
   assert.deepEqual(errors, []);
   console.log(
     'PASS: compact Chat fits 720×540; custom select keyboard/outside/Escape; focus survives save; single focus border; all tabs keep footer visible without horizontal overflow (mock IPC).',

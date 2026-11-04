@@ -19,3 +19,4 @@ cloud/.dev.vars
 cloud/.wrangler/
 admin/.svelte-kit/
 admin/.wrangler/
+admin/build/

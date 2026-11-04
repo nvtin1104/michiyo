@@ -26,22 +26,12 @@ export function validateConfig(c: Config) {
     throw new Error('Kích thước hoặc độ trong suốt không hợp lệ');
   if (
     new Set(
-      [
-        c.translateShortcut,
-        c.chatShortcut,
-        c.toggleShortcut,
-        c.shellShortcut,
-      ].map((v) => v.toLowerCase().trim()),
-    ).size !== 4
+      [c.chatShortcut, c.toggleShortcut, c.shellShortcut].map((v) =>
+        v.toLowerCase().trim(),
+      ),
+    ).size !== 3
   )
     throw new Error('Các phím tắt không được trùng nhau');
-  if (
-    !c.providers.length ||
-    c.providers.some(
-      (p) => !['claude', 'google', 'libre', 'mymemory', 'local'].includes(p),
-    )
-  )
-    throw new Error('Danh sách engine không hợp lệ');
   if (!['offline', 'online', 'hybrid'].includes(c.mode))
     throw new Error('Chế độ không hợp lệ');
   for (const [label, value] of [
@@ -81,18 +71,4 @@ export function validateConfig(c: Config) {
   }
   if (c.mode === 'offline' && !c.localModel.trim() && !isLocal(c.openaiBase))
     throw new Error('Chế độ Offline cần model chạy trên máy này');
-  let url: URL;
-  try {
-    url = new URL(c.libreUrl);
-  } catch {
-    throw new Error('LibreTranslate URL không hợp lệ');
-  }
-  if (
-    url.protocol !== 'https:' &&
-    !(
-      url.protocol === 'http:' &&
-      ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
-    )
-  )
-    throw new Error('LibreTranslate cần HTTPS hoặc localhost');
 }

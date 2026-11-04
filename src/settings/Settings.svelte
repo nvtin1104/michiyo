@@ -14,36 +14,151 @@
   import Select from '../lib/Select.svelte';
   const choices = (values: string[]) =>
     values.map((value) => ({ value, label: value }));
-  const languages = (auto = false) => [
-    ...(auto
-      ? [
-          {
-            value: 'auto',
-            label: $locale === 'en' ? 'Detect automatically' : 'Tự nhận diện',
-          },
-        ]
-      : []),
-    ...Object.entries({
-      vi: 'Tiếng Việt',
-      en: 'English',
-      ja: '日本語',
-      zh: '中文',
-      ko: '한국어',
-      fr: 'Français',
-      de: 'Deutsch',
-    }).map(([value, label]) => ({ value, label })),
-  ];
   export let config: Config;
   export let save: () => Promise<void>;
   let tab = 'Chung';
   let status = '';
   let keys: Record<string, string> = {
     claude: '',
-    google: '',
-    libre: '',
     openai: '',
     cloudCode: '',
+    cloudflareAiToken: '',
+    cloudflareDeployToken: '',
   };
+  let rememberDeployToken = true;
+  let deployProgressList: Array<{
+    step: string;
+    status: string;
+    message: string;
+  }> = [];
+  let isDeploying = false;
+  let cfAccounts: Array<{ id: string; name: string }> = [];
+  let selectedAccountId = '';
+  let newDeviceName = 'Điện thoại';
+  let createdPairCode: { code: string; expires_at: number } | null = null;
+
+  async function verifyAiToken() {
+    try {
+      status = 'Đang kiểm tra token Workers AI...';
+      const accounts = await call<Array<{ id: string; name: string }>>(
+        'cloud_ai_verify',
+        {
+          token: keys.cloudflareAiToken.trim(),
+        },
+      );
+      if (accounts.length > 0) {
+        config.workersAiAccount = accounts[0].id;
+        await call('save_secret', {
+          name: 'cloudflare_ai',
+          value: keys.cloudflareAiToken.trim(),
+        });
+        keys.cloudflareAiToken = '';
+        stored = await call('secret_status');
+        config.modelSource = 'workersai';
+        config.cloudFeatures.ai = true;
+        await save();
+        status =
+          'Đã kết nối Workers AI thành công! Model Cloudflare đã sẵn sàng.';
+      }
+    } catch (e) {
+      status = 'Lỗi kiểm tra token Workers AI: ' + String(e);
+    }
+  }
+
+  async function verifyBackendToken() {
+    try {
+      status = 'Đang kiểm tra token Cloudflare triển khai...';
+      cfAccounts = await call<Array<{ id: string; name: string }>>(
+        'cloud_backend_verify',
+        {
+          token: keys.cloudflareDeployToken.trim(),
+        },
+      );
+      if (cfAccounts.length > 0) {
+        selectedAccountId = cfAccounts[0].id;
+        status = `Token hợp lệ! Tìm thấy ${cfAccounts.length} tài khoản. Nhấn 'Triển khai backend' để bắt đầu.`;
+      }
+    } catch (e) {
+      status = 'Lỗi kiểm tra token: ' + String(e);
+    }
+  }
+
+  async function deployBackend() {
+    if (!selectedAccountId && cfAccounts.length > 0) {
+      selectedAccountId = cfAccounts[0].id;
+    }
+    if (!selectedAccountId) {
+      status = 'Chưa chọn tài khoản Cloudflare';
+      return;
+    }
+    try {
+      isDeploying = true;
+      deployProgressList = [];
+      status = 'Bắt đầu triển khai backend...';
+      const unlisten = await listen('cloud-deploy-progress', (event: any) => {
+        const item = event.payload;
+        const idx = deployProgressList.findIndex((p) => p.step === item.step);
+        if (idx >= 0) {
+          deployProgressList[idx] = item;
+        } else {
+          deployProgressList = [...deployProgressList, item];
+        }
+      });
+
+      const res = await call<{
+        url: string;
+        device_id: string;
+        d1_id: string;
+        version: string;
+      }>('cloud_backend_deploy', {
+        accountId: selectedAccountId,
+        token: keys.cloudflareDeployToken.trim(),
+        remember: rememberDeployToken,
+      });
+
+      unlisten();
+      config.cloudUrl = res.url;
+      config.cloudBackend = {
+        accountId: selectedAccountId,
+        d1Id: res.d1_id,
+        url: res.url,
+        version: res.version,
+      };
+      stored = await call('secret_status');
+      await save();
+      status =
+        'Triển khai backend hoàn tất! Máy này đã tự động ghép nối làm thiết bị quản trị.';
+    } catch (e) {
+      status = 'Lỗi triển khai: ' + String(e);
+    } finally {
+      isDeploying = false;
+    }
+  }
+
+  async function createPairCode() {
+    try {
+      status = 'Đang tạo mã ghép nối...';
+      createdPairCode = await call<{ code: string; expires_at: number }>(
+        'cloud_add_device',
+        {
+          name: newDeviceName.trim() || 'Thiết bị mới',
+        },
+      );
+      status = 'Đã tạo mã ghép nối!';
+    } catch (e) {
+      status = 'Lỗi tạo mã: ' + String(e);
+    }
+  }
+
+  async function openAdminPage() {
+    try {
+      status = 'Đang mở trang quản trị trong trình duyệt...';
+      await call('cloud_open_admin');
+      status = 'Đã mở trang quản trị.';
+    } catch (e) {
+      status = 'Lỗi mở trang quản trị: ' + String(e);
+    }
+  }
   let models: Record<string, string[]> = { external: [], local: [] };
   const presets: [string, string][] = [
     ['OpenAI', 'https://api.openai.com/v1'],
@@ -346,7 +461,7 @@
       <header class="settings-header">
         <h1>{t('Cài đặt', $locale)}</h1>
       </header>
-      {#each ['Chung', 'API', 'AI', 'Đồng bộ', 'Chat', 'Dịch', 'Phím tắt', 'Giao diện'] as name}<button
+      {#each ['Chung', 'API', 'AI', 'Cloud riêng', 'Đồng bộ', 'Chat', 'Phím tắt', 'Giao diện'] as name}<button
           class:active={tab === name}
           onclick={() => (tab = name)}>{t(name, $locale)}</button
         >{/each}
@@ -430,40 +545,35 @@
             'Hiện khóa đang nhập',
             $locale,
           )}</label
-        >{#each ['claude', 'google', 'libre'] as name}<div class="key-card">
-            <h3>
-              {name === 'claude'
-                ? 'Claude'
-                : name === 'google'
-                  ? 'Google Cloud'
-                  : 'LibreTranslate'}
-              <small>{stored[name] ? '● Đã có key' : '○ Chưa có key'}</small>
-            </h3>
-            <div class="compact-inline-row">
-              <input
-                aria-label={`${name} API key`}
-                type={show ? 'text' : 'password'}
-                bind:value={keys[name]}
-                placeholder={t('Nhập key mới · để trống + Lưu để xóa', $locale)}
-                autocomplete="off"
-              />
-              <button onclick={() => saveKey(name)}
-                >{t('Lưu key', $locale)}</button
-              ><button
-                onclick={async () => {
-                  try {
-                    status = await call<string>('test_connection', { name });
-                  } catch (e) {
-                    status = String(e);
-                  }
-                }}>{t('Kiểm tra kết nối', $locale)}</button
-              >
-            </div>
-          </div>{/each}<label
-          >{t('LibreTranslate URL', $locale)}<input
-            bind:value={config.libreUrl}
-          /></label
         >
+        <div class="key-card">
+          <h3>
+            Claude
+            <small>{stored.claude ? '● Đã có key' : '○ Chưa có key'}</small>
+          </h3>
+          <div class="compact-inline-row">
+            <input
+              aria-label="claude API key"
+              type={show ? 'text' : 'password'}
+              bind:value={keys.claude}
+              placeholder={t('Nhập key mới · để trống + Lưu để xóa', $locale)}
+              autocomplete="off"
+            />
+            <button onclick={() => saveKey('claude')}
+              >{t('Lưu key', $locale)}</button
+            ><button
+              onclick={async () => {
+                try {
+                  status = await call<string>('test_connection', {
+                    name: 'claude',
+                  });
+                } catch (e) {
+                  status = String(e);
+                }
+              }}>{t('Kiểm tra kết nối', $locale)}</button
+            >
+          </div>
+        </div>
         <p class="muted">
           {t('Khóa chỉ được lưu trong kho bảo mật của hệ điều hành.', $locale)}
         </p>
@@ -835,6 +945,276 @@
             </label>
           </div>
         {/if}
+      {:else if tab === 'Cloud riêng'}
+        <div class="cloud-features-grid">
+          <!-- 1. AI Cloud riêng -->
+          <div class="key-card">
+            <div class="ai-pane-head">
+              <h3>
+                1. AI Cloud riêng (Workers AI)
+                <small
+                  >{stored.cloudflare_ai
+                    ? '● Đã kết nối'
+                    : '○ Chưa kết nối'}</small
+                >
+              </h3>
+            </div>
+            <p class="muted">
+              Sử dụng 10.000 Neurons GPU miễn phí mỗi ngày từ tài khoản
+              Cloudflare của riêng bạn. Gọi trực tiếp API, không tốn phí duy trì
+              server.
+            </p>
+            {#if !stored.cloudflare_ai}
+              <label>
+                API Token Cloudflare (quyền Workers AI Read)
+                <input
+                  type="password"
+                  bind:value={keys.cloudflareAiToken}
+                  placeholder="Dán Cloudflare API Token vào đây..."
+                />
+              </label>
+              <div class="actions">
+                <button
+                  disabled={!keys.cloudflareAiToken.trim()}
+                  onclick={verifyAiToken}>Kiểm tra & Kết nối AI</button
+                >
+                <a
+                  href="https://dash.cloudflare.com/profile/api-tokens"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="button-link">Tạo token trên Cloudflare ↗</a
+                >
+              </div>
+            {:else}
+              <div class="columns">
+                <label>
+                  Model Workers AI
+                  <input
+                    bind:value={config.workersAiModel}
+                    placeholder="@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+                  />
+                </label>
+                <label>
+                  Bật AI Cloud
+                  <input
+                    type="checkbox"
+                    bind:checked={config.cloudFeatures.ai}
+                    onchange={async () => {
+                      if (config.cloudFeatures.ai)
+                        config.modelSource = 'workersai';
+                      await save();
+                    }}
+                  />
+                </label>
+              </div>
+              <div class="actions">
+                <button
+                  onclick={async () => {
+                    config.modelSource = 'workersai';
+                    await save();
+                    status = 'Đã đặt Workers AI làm model chính!';
+                  }}>Đặt làm AI chính</button
+                >
+                <button
+                  onclick={async () => {
+                    await call('save_secret', {
+                      name: 'cloudflare_ai',
+                      value: '',
+                    });
+                    stored = await call('secret_status');
+                    status = 'Đã ngắt kết nối Workers AI';
+                  }}>Ngắt kết nối</button
+                >
+              </div>
+            {/if}
+          </div>
+
+          <!-- 2. Backend riêng (Đồng bộ + Ghép nối + Web Quản trị) -->
+          <div class="key-card">
+            <div class="ai-pane-head">
+              <h3>
+                2. Backend riêng (Đồng bộ & Quản trị)
+                <small
+                  >{stored.cloud ? '● Đã sẵn sàng' : '○ Chưa triển khai'}</small
+                >
+              </h3>
+            </div>
+            <p class="muted">
+              Tự động khởi tạo cơ sở dữ liệu Cloudflare D1 và Worker riêng để
+              đồng bộ dữ liệu bảo mật và quản lý thiết bị.
+            </p>
+
+            {#if !stored.cloud}
+              {#if cfAccounts.length === 0}
+                <label>
+                  API Token triển khai (quyền Workers Scripts Edit, D1 Edit,
+                  Account Settings Read)
+                  <input
+                    type="password"
+                    bind:value={keys.cloudflareDeployToken}
+                    placeholder="Dán token triển khai..."
+                  />
+                </label>
+                <div class="actions">
+                  <button
+                    disabled={!keys.cloudflareDeployToken.trim()}
+                    onclick={verifyBackendToken}>Kiểm tra token</button
+                  >
+                  <a
+                    href="https://dash.cloudflare.com/profile/api-tokens"
+                    target="_blank"
+                    rel="noreferrer"
+                    class="button-link">Tạo token trên Cloudflare ↗</a
+                  >
+                </div>
+              {:else}
+                <div class="columns">
+                  <label>
+                    Chọn tài khoản Cloudflare
+                    <select bind:value={selectedAccountId}>
+                      {#each cfAccounts as acc}
+                        <option value={acc.id}
+                          >{acc.name} ({acc.id.slice(0, 8)}...)</option
+                        >
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="compact-inline-row" style="margin-top: 1.5rem;">
+                    <input type="checkbox" bind:checked={rememberDeployToken} />
+                    Ghi nhớ token để cập nhật backend sau này
+                  </label>
+                </div>
+
+                {#if deployProgressList.length > 0}
+                  <div class="deploy-steps">
+                    {#each deployProgressList as step}
+                      <div class="step-item {step.status}">
+                        <span class="step-icon"
+                          >{step.status === 'done'
+                            ? '✓'
+                            : step.status === 'error'
+                              ? '✗'
+                              : '⏳'}</span
+                        >
+                        <span class="step-msg">{step.message}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+
+                <div class="actions">
+                  <button disabled={isDeploying} onclick={deployBackend}>
+                    {isDeploying
+                      ? 'Đang triển khai...'
+                      : 'Triển khai backend ngay'}
+                  </button>
+                  <button
+                    onclick={() => {
+                      cfAccounts = [];
+                    }}>Đổi token khác</button
+                  >
+                </div>
+              {/if}
+            {:else}
+              <div class="columns">
+                <label>
+                  Địa chỉ Backend URL
+                  <input readonly value={config.cloudUrl} />
+                </label>
+                <label>
+                  Phiên bản
+                  <input
+                    readonly
+                    value={config.cloudBackend?.version
+                      ? config.cloudBackend.version.slice(0, 10)
+                      : 'v1.0'}
+                  />
+                </label>
+              </div>
+
+              <!-- Mở khóa các tính năng con -->
+              <div
+                class="sub-features-panel"
+                style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;"
+              >
+                <h4>Mở khóa các tính năng của Backend riêng:</h4>
+                <div class="feature-toggle-row">
+                  <label class="compact-inline-row">
+                    <input
+                      type="checkbox"
+                      bind:checked={config.cloudFeatures.sync}
+                      onchange={save}
+                    />
+                    <strong>Tính năng Đồng bộ:</strong> Đồng bộ ghi chú, thói quen
+                    và lịch qua backend này
+                  </label>
+                </div>
+                <div class="feature-toggle-row" style="margin-top: 0.5rem;">
+                  <label class="compact-inline-row">
+                    <input
+                      type="checkbox"
+                      bind:checked={config.cloudFeatures.devices}
+                      onchange={save}
+                    />
+                    <strong>Kết nối thiết bị khác / Mobile:</strong> Cho phép ghép
+                    nối máy tính hoặc điện thoại khác
+                  </label>
+                </div>
+                <div class="feature-toggle-row" style="margin-top: 0.5rem;">
+                  <label class="compact-inline-row">
+                    <input
+                      type="checkbox"
+                      bind:checked={config.cloudFeatures.admin}
+                      onchange={save}
+                    />
+                    <strong>Web Quản trị:</strong> Mở trang web quản trị của bạn trực
+                    tiếp
+                  </label>
+                </div>
+
+                {#if config.cloudFeatures.devices}
+                  <div
+                    class="device-pair-box"
+                    style="margin-top: 1rem; background: rgba(255,255,255,0.03); padding: 0.75rem; border-radius: 0.5rem;"
+                  >
+                    <h5>
+                      Ghép nối thiết bị mới (Điện thoại hoặc máy tính phụ)
+                    </h5>
+                    <div class="compact-inline-row">
+                      <input
+                        bind:value={newDeviceName}
+                        placeholder="Tên thiết bị (vd: iPhone, Laptop)"
+                      />
+                      <button onclick={createPairCode}>Lấy mã ghép nối</button>
+                    </div>
+                    {#if createdPairCode}
+                      <p
+                        class="pair-code-display"
+                        style="margin-top: 0.5rem; font-size: 1.1rem; color: #a3e635;"
+                      >
+                        Mã: <strong>{createdPairCode.code}</strong> (hiệu lực 10 phút)
+                      </p>
+                    {/if}
+                  </div>
+                {/if}
+
+                {#if config.cloudFeatures.admin}
+                  <div style="margin-top: 1rem;">
+                    <button onclick={openAdminPage}
+                      >Mở trang web quản trị riêng ↗</button
+                    >
+                  </div>
+                {/if}
+
+                <div style="margin-top: 1.5rem;">
+                  <button onclick={unpairCloud} class="danger"
+                    >Ngắt kết nối backend này</button
+                  >
+                </div>
+              </div>
+            {/if}
+          </div>
+        </div>
       {:else if tab === 'Đồng bộ'}
         {#await loadSync()}{/await}
         <p class="muted">
@@ -908,67 +1288,7 @@
             bind:value={config.historyLimit}
           /></label
         >
-      {:else if tab === 'Dịch'}<div class="columns">
-          <label
-            >{t('Nguồn', $locale)}<Select
-              label={t('Nguồn', $locale)}
-              bind:value={config.source}
-              options={languages(true)}
-              onchange={changed}
-            /></label
-          ><label
-            >{t('Đích', $locale)}<Select
-              label={t('Đích', $locale)}
-              bind:value={config.target}
-              options={languages()}
-              onchange={changed}
-            /></label
-          ><label
-            >{t('Đích thay thế', $locale)}<Select
-              label={t('Đích thay thế', $locale)}
-              bind:value={config.alternate}
-              options={languages()}
-              onchange={changed}
-            /></label
-          >
-        </div>
-        <label
-          >{t('Lĩnh vực', $locale)}<input bind:value={config.domain} /></label
-        ><label
-          >{t('Giọng văn', $locale)}<Select
-            label={t('Giọng văn', $locale)}
-            bind:value={config.tone}
-            options={choices(['Tự nhiên', 'Trang trọng', 'Thân mật'])}
-            onchange={changed}
-          /></label
-        >
-        <h3>{t('Thứ tự engine', $locale)}</h3>
-        {#each config.providers as provider, i}<div class="provider-row">
-            <span>0{i + 1} / {provider}</span><button
-              disabled={i === 0}
-              onclick={() => {
-                const a = [...config.providers];
-                [a[i - 1], a[i]] = [a[i], a[i - 1]];
-                config.providers = a;
-                changed();
-              }}>↑</button
-            >
-          </div>{/each}<label class="check"
-          ><input type="checkbox" bind:checked={config.fallback} />{t(
-            'Tự chuyển engine khi gặp lỗi',
-            $locale,
-          )}</label
-        ><label class="check"
-          ><input type="checkbox" bind:checked={config.clipboardWatch} />{t(
-            'Dịch khi copy (văn bản sẽ gửi tới engine đã chọn)',
-            $locale,
-          )}</label
-        >
       {:else if tab === 'Phím tắt'}<label
-          >{t('Dịch văn bản đã chọn', $locale)}<input
-            bind:value={config.translateShortcut}
-          /></label
-        ><label
           >{t('Mở Chat', $locale)}<input
             bind:value={config.chatShortcut}
           /></label

@@ -352,10 +352,6 @@
             this={module.default}
             bind:config
             {save}
-          />{/await}{:else if view === 'translate'}{#await import('./translate/Translate.svelte') then module}<svelte:component
-            this={module.default}
-            compact={desktop ||
-              new URLSearchParams(location.search).has('compact')}
           />{/await}{:else}{#await import('./chat/Chat.svelte') then module}<svelte:component
             this={module.default}
             {config}
