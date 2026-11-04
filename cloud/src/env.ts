@@ -17,6 +17,10 @@ export interface Env {
   /** Comma-separated Telegram private chat IDs, never empty in an enabled bot. */
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
   TELEGRAM_QUEUE?: Queue<{ updateId: number; payload: string; receivedAt: number }>;
+  /** One-time secret the desktop app uses to create the owner device (`POST /v1/pair/bootstrap`). */
+  BOOTSTRAP_SECRET?: string;
+  /** Static assets binding serving the admin SPA. */
+  ASSETS?: Fetcher;
 }
 
 export const DEFAULT_MODEL = '@cf/meta/llama-3.1-8b-instruct';

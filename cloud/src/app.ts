@@ -16,7 +16,19 @@ const DAY_MS = 86_400_000;
 
 export const app = new Hono<{ Bindings: Env; Variables: Vars }>();
 
-const fail = (c: Ctx, status: 400 | 401 | 403 | 404 | 429 | 502, error: string) => c.json({ error }, status);
+const fail = (c: Ctx, status: 400 | 401 | 403 | 404 | 409 | 429 | 502, error: string) => c.json({ error }, status);
+
+const SESSION_COOKIE = 'michiyo_admin';
+const SESSION_MS = 12 * 60 * 60_000;
+const LOGIN_CODE_MS = 60_000;
+
+function cookie(c: Ctx, name: string): string | null {
+  for (const part of (c.req.header('Cookie') ?? '').split(';')) {
+    const index = part.indexOf('=');
+    if (index > 0 && part.slice(0, index).trim() === name) return part.slice(index + 1).trim() || null;
+  }
+  return null;
+}
 
 /** Run after the response is sent; falls back to a detached promise outside a Worker (tests). */
 function defer(c: Ctx, work: Promise<unknown>): void {
@@ -45,7 +57,7 @@ async function rateLimited(env: Env, bucket: string, limit: number, windowMs: nu
   return (row?.count ?? 0) > limit;
 }
 
-// ---- admin: Cloudflare Access JWT, or the local-only dev token -------------------------------
+// ---- admin: Cloudflare Access JWT, owner device, web session cookie, or the local-only dev token
 
 async function requireAdmin(c: Ctx, next: () => Promise<void>) {
   const env = c.env;
@@ -58,9 +70,29 @@ async function requireAdmin(c: Ctx, next: () => Promise<void>) {
     }
   }
   const token = bearer(c);
+  if (token?.startsWith('md_')) {
+    const owner = await env.DB.prepare('SELECT id FROM devices WHERE token_hash = ? AND revoked_at IS NULL AND owner = 1')
+      .bind(await sha256Hex(token))
+      .first<{ id: string }>();
+    if (owner) {
+      defer(c, env.DB.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').bind(Date.now(), owner.id).run());
+      c.set('admin', `owner:${owner.id}`);
+      return next();
+    }
+  }
   if (token && env.ENVIRONMENT === 'development' && env.DEV_ADMIN_TOKEN && (await sha256Hex(token)) === (await sha256Hex(env.DEV_ADMIN_TOKEN))) {
     c.set('admin', 'dev');
     return next();
+  }
+  const session = cookie(c, SESSION_COOKIE);
+  if (session) {
+    const row = await env.DB.prepare('SELECT 1 AS ok FROM admin_sessions WHERE id_hash = ? AND expires_at > ?')
+      .bind(await sha256Hex(session), Date.now())
+      .first<{ ok: number }>();
+    if (row) {
+      c.set('admin', 'web');
+      return next();
+    }
   }
   return fail(c, 401, 'unauthorized');
 }
@@ -148,6 +180,28 @@ app.post('/v1/pair/complete', async (c) => {
   const token = randomToken('md_');
   const id = crypto.randomUUID();
   await c.env.DB.prepare('INSERT INTO devices (id, name, token_hash, created_at) VALUES (?, ?, ?, ?)')
+    .bind(id, name, await sha256Hex(token), Date.now())
+    .run();
+  return c.json({ device_id: id, name, token });
+});
+
+// The desktop app deploys this Worker with a fresh BOOTSTRAP_SECRET and exchanges it once for
+// the owner device token, which can then administer the Worker (pairing, web admin login).
+app.post('/v1/pair/bootstrap', async (c) => {
+  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+  if (await rateLimited(c.env, `bootstrap:${ip}`, 10, 10 * 60_000)) return fail(c, 429, 'too_many_attempts');
+  if (!c.env.BOOTSTRAP_SECRET) return fail(c, 404, 'not_found');
+  const body = await c.req.json().catch(() => ({}));
+  const hash = await sha256Hex(typeof body?.secret === 'string' ? body.secret : '');
+  if (typeof body?.secret !== 'string' || hash !== (await sha256Hex(c.env.BOOTSTRAP_SECRET))) return fail(c, 401, 'unauthorized');
+  const claimed = await c.env.DB.prepare('INSERT INTO bootstrap_used (secret_hash, used_at) VALUES (?, ?) ON CONFLICT(secret_hash) DO NOTHING RETURNING secret_hash')
+    .bind(hash, Date.now())
+    .first();
+  if (!claimed) return c.json({ error: 'bootstrap_used' }, 409);
+  const name = typeof body.device_name === 'string' && body.device_name.trim() ? body.device_name.trim().slice(0, 60) : 'Máy tính chính';
+  const token = randomToken('md_');
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare('INSERT INTO devices (id, name, token_hash, created_at, owner) VALUES (?, ?, ?, ?, 1)')
     .bind(id, name, await sha256Hex(token), Date.now())
     .run();
   return c.json({ device_id: id, name, token });
@@ -254,8 +308,19 @@ const admin = new Hono<{ Bindings: Env; Variables: Vars }>();
 admin.use('*', requireAdmin);
 
 admin.get('/devices', async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT id, name, created_at, last_seen, revoked_at FROM devices ORDER BY created_at DESC').all();
+  const { results } = await c.env.DB.prepare('SELECT id, name, created_at, last_seen, revoked_at, owner FROM devices ORDER BY created_at DESC').all();
   return c.json({ devices: results });
+});
+
+// One-time code (60 s) the desktop app puts in `<worker>/login#code=…` to open the web admin.
+admin.post('/web-login', async (c) => {
+  const now = Date.now();
+  await c.env.DB.prepare('DELETE FROM login_codes WHERE expires_at <= ?').bind(now).run();
+  const code = randomToken('ml_');
+  const expiresAt = now + LOGIN_CODE_MS;
+  await c.env.DB.prepare('INSERT INTO login_codes (code_hash, expires_at) VALUES (?, ?)').bind(await sha256Hex(code), expiresAt).run();
+  c.header('Cache-Control', 'no-store');
+  return c.json({ code, expires_at: expiresAt });
 });
 
 admin.patch('/devices/:id', async (c) => {
@@ -402,11 +467,92 @@ admin.get('/sync/records', async (c) => {
 
 app.route('/v1/admin', admin);
 
+// ---- web admin: session cookie and the same-origin /api bridge --------------------------------
+
+/** Writes from the admin page must come from this origin (the cookie is also SameSite=Strict). */
+function sameOrigin(c: Ctx): boolean {
+  return c.req.header('Origin') === new URL(c.req.url).origin;
+}
+
+const sessionCookie = (value: string, maxAge: number) =>
+  `${SESSION_COOKIE}=${value}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
+
+app.post('/api/session', async (c) => {
+  if (!sameOrigin(c)) return fail(c, 403, 'forbidden');
+  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+  if (await rateLimited(c.env, `session:${ip}`, 10, 10 * 60_000)) return fail(c, 429, 'too_many_attempts');
+  const body = await c.req.json().catch(() => ({}));
+  if (typeof body?.code !== 'string' || !body.code) return fail(c, 400, 'invalid_code');
+  const now = Date.now();
+  const row = await c.env.DB.prepare('DELETE FROM login_codes WHERE code_hash = ? AND expires_at > ? RETURNING code_hash')
+    .bind(await sha256Hex(body.code), now)
+    .first();
+  if (!row) return fail(c, 400, 'invalid_code');
+  await c.env.DB.prepare('DELETE FROM admin_sessions WHERE expires_at <= ?').bind(now).run();
+  const session = randomToken('ms_');
+  await c.env.DB.prepare('INSERT INTO admin_sessions (id_hash, expires_at) VALUES (?, ?)').bind(await sha256Hex(session), now + SESSION_MS).run();
+  c.header('Set-Cookie', sessionCookie(session, SESSION_MS / 1000));
+  c.header('Cache-Control', 'no-store');
+  return c.json({ ok: true });
+});
+
+app.post('/api/logout', async (c) => {
+  if (!sameOrigin(c)) return fail(c, 403, 'forbidden');
+  const session = cookie(c, SESSION_COOKIE);
+  if (session) await c.env.DB.prepare('DELETE FROM admin_sessions WHERE id_hash = ?').bind(await sha256Hex(session)).run();
+  c.header('Set-Cookie', sessionCookie('', 0));
+  c.header('Cache-Control', 'no-store');
+  return c.json({ ok: true });
+});
+
+// Only these routes are reachable from the admin page; each maps `/api/<path>` to `/v1/<path>`.
+const API_ALLOWED: Record<string, RegExp[]> = {
+  GET: [/^admin\/(devices|api-keys|provider-keys|usage|sync\/(summary|records)|telegram\/(summary|issues|config))$/],
+  POST: [/^pair\/start$/, /^admin\/api-keys$/, /^admin\/telegram\/issues\/\d+\/(retry|resolve)$/],
+  PUT: [/^admin\/provider-keys\/(anthropic|openai|openrouter)$/, /^admin\/telegram\/config$/],
+  PATCH: [/^admin\/devices\/[a-zA-Z0-9-]+$/],
+  DELETE: [/^admin\/(devices|api-keys)\/[a-zA-Z0-9-]+$/, /^admin\/provider-keys\/(anthropic|openai|openrouter)$/],
+};
+
+app.all('/api/*', async (c) => {
+  const url = new URL(c.req.url);
+  const path = url.pathname.slice('/api/'.length);
+  const method = c.req.method;
+  if (!API_ALLOWED[method]?.some((pattern) => pattern.test(path))) return fail(c, 404, 'not_found');
+  if (method !== 'GET' && !sameOrigin(c)) return fail(c, 403, 'forbidden');
+  // Forward only what admin auth needs; no bearer credential is accepted from the browser.
+  const headers = new Headers();
+  for (const name of ['Cookie', 'Cf-Access-Jwt-Assertion', 'Content-Type', 'CF-Connecting-IP']) {
+    const value = c.req.header(name);
+    if (value) headers.set(name, value);
+  }
+  let ctx: ExecutionContext | undefined;
+  try {
+    ctx = c.executionCtx;
+  } catch {
+    ctx = undefined;
+  }
+  const upstream = await app.fetch(
+    new Request(`${url.origin}/v1/${path}${url.search}`, { method, headers, body: method === 'GET' ? undefined : await c.req.text() }),
+    c.env,
+    ctx,
+  );
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: { 'Cache-Control': 'no-store', 'Content-Type': upstream.headers.get('Content-Type') ?? 'application/json' },
+  });
+});
+
 /** For server-side use by later phases (bot, AI Gateway proxy); no HTTP route exposes it. */
 export async function getProviderKey(env: Env, provider: string): Promise<string | null> {
   const row = await env.DB.prepare('SELECT ciphertext FROM provider_keys WHERE provider = ?').bind(provider).first<{ ciphertext: string }>();
   return row ? decrypt(env.ENCRYPTION_KEY, row.ciphertext) : null;
 }
 
-app.notFound((c) => c.json({ error: 'not_found' }, 404));
+app.notFound((c) => {
+  // Everything outside the API is the admin SPA (static assets binding) when deployed with it.
+  const path = c.req.path;
+  if (c.env.ASSETS && !path.startsWith('/v1/') && !path.startsWith('/api/')) return c.env.ASSETS.fetch(c.req.raw);
+  return c.json({ error: 'not_found' }, 404);
+});
 app.onError((_error, c) => c.json({ error: 'internal_error' }, 500));

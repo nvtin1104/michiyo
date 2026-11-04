@@ -13,6 +13,12 @@
     }
   ],
   "ai": { "binding": "AI" },
+  "assets": {
+    "directory": "../admin/build",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/v1/*"],
+    "not_found_handling": "single-page-application"
+  },
   "triggers": { "crons": ["*/5 * * * *"] },
   "queues": {
     "producers": [{ "binding": "TELEGRAM_QUEUE", "queue": "michiyo-telegram" }],
@@ -27,7 +33,4 @@
     "DEFAULT_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct",
     "ALLOWED_CHAT_MODELS": "@cf/meta/llama-3.1-8b-instruct,@cf/meta/llama-3.3-70b-instruct-fp8-fast"
   }
-  // Secrets (set with `wrangler secret put`): ENCRYPTION_KEY (base64, 32 bytes),
-  // TELEGRAM_WEBHOOK_SECRET and TELEGRAM_BOT_TOKEN for the Telegram bot.
-  // Local development only: ENVIRONMENT=development and DEV_ADMIN_TOKEN in .dev.vars.
 }
