@@ -2,12 +2,16 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/schemas/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/schemas/
+apps/desktop/dist/
 *.log
 .env*
 artifacts/
 src-tauri/resources/claude-agent/
 
 shared/dist/
+packages/shared/dist/
 *.db
 *.db-shm
 *.db-wal
@@ -20,3 +24,8 @@ cloud/.wrangler/
 admin/.svelte-kit/
 admin/.wrangler/
 admin/build/
+apps/cloud/.dev.vars
+apps/cloud/.wrangler/
+apps/admin/.svelte-kit/
+apps/admin/.wrangler/
+apps/admin/build/
